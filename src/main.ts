@@ -3,12 +3,13 @@ import * as THREE from 'three';
 import { Input } from './input';
 import { createWorld, respawnPoint } from './world';
 import { Player } from './player';
-import { Zombie } from './enemy';
+import type { Enemy } from './enemy';
 import { Ally, SQUAD_SIZE } from './ally';
 import { ThirdPersonCamera } from './camera';
 import { Hud } from './hud';
 import { Particles } from './particles';
 import { Floaters } from './floaters';
+import { Projectiles } from './projectiles';
 import { initAudio, sfx } from './audio';
 import { Campaign, type Objective } from './campaign';
 import { CAMP_BANNER } from './layout';
@@ -35,6 +36,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 400);
 const world = createWorld(scene);
 const particles = new Particles(scene);
+const projectiles = new Projectiles(scene);
 const player = new Player(scene);
 const camCtrl = new ThirdPersonCamera(camera);
 const input = new Input(renderer.domElement);
@@ -48,7 +50,7 @@ function applySettings(s: Settings) {
 }
 applySettings(settings);
 
-const enemies: Zombie[] = [];
+const enemies: Enemy[] = [];
 const allies = Array.from({ length: SQUAD_SIZE }, (_, i) => new Ally(scene, i));
 
 /** 'menu' covers the title, naming and intro screens; the world idles behind them. */
@@ -66,18 +68,21 @@ const ctx: GameContext = {
   allies,
   enemies,
   particles,
+  projectiles,
   peaceful: true,
+  arenaLock: null,
   floatText: (at, text, kind) => floaters.spawn(at, text, kind),
   addShake: (amount) => camCtrl.addShake(amount),
   hitStop: (seconds) => {
     hitStopTimer = Math.max(hitStopTimer, seconds);
   },
   onEnemyKilled: (z) => {
+    if (z.xpReward === 0) return; // the Witch Queen's mirror images don't count
     kills++;
     floaters.spawn(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP`, 'xp');
     awardXp(z.xpReward);
   },
-  summonMinions: (around, count) => campaign.summonMinions(around, count),
+  summonMinions: (around, count) => campaign.summonMinions(around, count, ctx),
 };
 
 const campaign = new Campaign(scene, world, enemies, {
@@ -144,6 +149,8 @@ function enterWorld(save: SaveData) {
   camCtrl.pitch = 0.12;
   camCtrl.cut();
   floaters.clear();
+  projectiles.clear();
+  ctx.arenaLock = null;
   hitStopTimer = 0;
   deathShown = false;
   hud.showDeath(false);
@@ -153,14 +160,17 @@ function enterWorld(save: SaveData) {
   ctx.peaceful = false;
 }
 
-const mass = (b: Player | Ally | Zombie) =>
-  b === player ? 3 : b === campaign.king ? 12 : b instanceof Zombie ? (b.radius > 0.5 ? 2.5 : 1) : 1;
+const mass = (b: Player | Ally | Enemy) => {
+  if (b === player) return 3;
+  if ('isBoss' in b) return b.isBoss ? 12 : b.radius > 0.5 ? 2.5 : 1;
+  return 1;
+};
 
 /** Keeps bodies from overlapping; heavier bodies get pushed less. */
 function separateBodies() {
-  const bodies: (Player | Ally | Zombie)[] = [player];
+  const bodies: (Player | Ally | Enemy)[] = [player];
   for (const a of allies) if (a.alive) bodies.push(a);
-  for (const z of enemies) if (z.alive && z.pos.distanceToSquared(player.pos) < 40 * 40) bodies.push(z);
+  for (const e of enemies) if (e.alive && !e.flying && e.pos.distanceToSquared(player.pos) < 40 * 40) bodies.push(e);
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i];
@@ -194,12 +204,17 @@ function updateEnemies(dt: number) {
 function mapData(objective: Objective): MapData {
   return {
     player: { x: player.pos.x, z: player.pos.z, yaw: player.yaw },
+    heroLevel: player.level,
     allies: allies.filter((a) => a.alive).map((a) => ({ x: a.pos.x, z: a.pos.z })),
     outposts: campaign.outposts.map((o) => ({ x: o.def.x, z: o.def.z, name: o.def.name, captured: o.captured })),
     checkpoints: campaign.checkpoints
       .filter((c) => c.unlocked)
       .map((c) => ({ x: c.banner.x, z: c.banner.z, current: c === campaign.current })),
-    kingDefeated: campaign.kingDefeated,
+    liberated: {
+      zombie: campaign.isLiberated(campaign.territories[0]),
+      witch: campaign.isLiberated(campaign.territories[1]),
+      vampire: campaign.isLiberated(campaign.territories[2]),
+    },
     objective: objective.at ? { x: objective.at.x, z: objective.at.z } : null,
   };
 }
@@ -305,6 +320,7 @@ function tick(realDt: number) {
       updateEnemies(dt);
       separateBodies();
       campaign.update(dt, ctx);
+      projectiles.update(dt, ctx);
       particles.update(dt);
       floaters.update(dt, camera);
     }
@@ -326,9 +342,10 @@ function tick(realDt: number) {
       hud.showDeath(true);
     }
 
-    const objective = campaign.objective(player.pos);
+    const objective = campaign.objective(player.pos, player.level);
     hud.setObjective(objective.text, objective.at, camera, player.pos);
-    if (campaign.bossState === 'fighting') hud.setBossHealth(campaign.king.healthFraction);
+    const fight = campaign.activeFight;
+    if (fight) hud.setBossHealth(fight.leader.healthFraction);
     if (hud.mapOpen) hud.drawMap(mapData(objective));
   }
 
@@ -355,6 +372,7 @@ Object.assign(window, {
     allies,
     enemies,
     campaign,
+    projectiles,
     camCtrl,
     camera,
     renderer,

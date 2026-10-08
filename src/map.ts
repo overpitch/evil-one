@@ -1,14 +1,24 @@
-import { HUMAN_CAMP, KING_ARENA, VAMPIRE_LAND, WITCH_LAND, ZOMAWI_FORTRESS, ZOMBIE_LAND } from './layout';
+import { HUMAN_CAMP, TERRITORIES, ZOMAWI_FORTRESS, type TerritoryId } from './layout';
 import { WORLD_HALF } from './world';
 
 export interface MapData {
   player: { x: number; z: number; yaw: number };
+  heroLevel: number;
   allies: { x: number; z: number }[];
   outposts: { x: number; z: number; name: string; captured: boolean }[];
   checkpoints: { x: number; z: number; current: boolean }[];
-  kingDefeated: boolean;
+  liberated: Record<TerritoryId, boolean>;
   objective: { x: number; z: number } | null;
 }
+
+const REGION_FILL: Record<TerritoryId, [string, string]> = {
+  // [held by the enemy, liberated]
+  zombie: ['rgba(95, 100, 55, 0.75)', 'rgba(110, 120, 70, 0.4)'],
+  witch: ['rgba(80, 55, 110, 0.75)', 'rgba(90, 75, 120, 0.4)'],
+  vampire: ['rgba(100, 30, 45, 0.75)', 'rgba(110, 60, 70, 0.4)'],
+};
+
+const LEADER_ICON: Record<TerritoryId, string> = { zombie: '♛', witch: '✦', vampire: '♜' };
 
 /**
  * Draws the world map, north up. The world's +Z is north and -X is east,
@@ -29,21 +39,27 @@ export function drawMap(canvas: HTMLCanvasElement, data: MapData) {
     g.arc(sx(x), sy(z), sr(r), 0, Math.PI * 2);
     g.fillStyle = fill;
     g.fill();
-    g.fillStyle = 'rgba(242, 234, 216, 0.85)';
+    g.fillStyle = 'rgba(242, 234, 216, 0.9)';
     g.font = `bold ${size / 38}px Georgia, serif`;
     g.textAlign = 'center';
-    const ly = sy(z) + sr(r) * (labelBelow ? 0.62 : -0.55);
+    const ly = sy(z) + sr(r) * (labelBelow ? 0.62 : -0.62);
     g.fillText(label, sx(x), ly);
     if (sub) {
       g.font = `${size / 52}px Georgia, serif`;
-      g.fillStyle = 'rgba(242, 234, 216, 0.55)';
+      g.fillStyle = 'rgba(242, 234, 216, 0.65)';
       g.fillText(sub, sx(x), ly + size / 34);
     }
   };
-  region(ZOMBIE_LAND.x, ZOMBIE_LAND.z, ZOMBIE_LAND.r, data.kingDefeated ? 'rgba(110, 120, 70, 0.55)' : 'rgba(95, 100, 55, 0.75)', 'Zombie Lands', data.kingDefeated ? 'Liberated' : undefined, true);
-  region(WITCH_LAND.x, WITCH_LAND.z, WITCH_LAND.r, 'rgba(70, 50, 90, 0.45)', 'Witch Lands', 'Not yet reachable');
-  region(VAMPIRE_LAND.x, VAMPIRE_LAND.z, VAMPIRE_LAND.r, 'rgba(90, 30, 40, 0.45)', 'Vampire Lands', 'Not yet reachable');
-  region(ZOMAWI_FORTRESS.x, ZOMAWI_FORTRESS.z, ZOMAWI_FORTRESS.r, 'rgba(20, 15, 20, 0.6)', "Zomawi's Fortress", 'Sealed');
+
+  let defeated = 0;
+  for (const t of TERRITORIES) {
+    const free = data.liberated[t.id];
+    if (free) defeated++;
+    const sub = free ? 'Liberated' : `Recommended level ${t.recommendedLevel}${data.heroLevel < t.recommendedLevel ? ' ⚠' : ''}`;
+    // Zombie Lands' label goes below so it doesn't cover the crypt.
+    region(t.center.x, t.center.z, t.center.r, REGION_FILL[t.id][free ? 1 : 0], t.name, sub, t.id === 'zombie');
+  }
+  region(ZOMAWI_FORTRESS.x, ZOMAWI_FORTRESS.z, ZOMAWI_FORTRESS.r, 'rgba(20, 15, 20, 0.6)', "Zomawi's Fortress", `Sealed · ${defeated} of 3 leaders defeated`);
   region(HUMAN_CAMP.x, HUMAN_CAMP.z, 14, 'rgba(160, 120, 70, 0.6)', 'Human Camp');
 
   const icon = (x: number, z: number, glyph: string, color: string, px = size / 26) => {
@@ -57,10 +73,10 @@ export function drawMap(canvas: HTMLCanvasElement, data: MapData) {
     g.textBaseline = 'alphabetic';
   };
   const label = (x: number, z: number, text: string) => {
-    g.font = `${size / 50}px Georgia, serif`;
+    g.font = `${size / 54}px Georgia, serif`;
     g.textAlign = 'center';
     g.fillStyle = 'rgba(242, 234, 216, 0.8)';
-    g.fillText(text, sx(x), sy(z) + size / 28);
+    g.fillText(text, sx(x), sy(z) + size / 30);
   };
 
   for (const o of data.outposts) {
@@ -68,16 +84,18 @@ export function drawMap(canvas: HTMLCanvasElement, data: MapData) {
     label(o.x, o.z, o.name);
   }
   for (const c of data.checkpoints) {
-    if (c.current) {
-      g.strokeStyle = '#ffd36b';
-      g.lineWidth = 2;
-      g.beginPath();
-      g.arc(sx(c.x), sy(c.z), size / 40, 0, Math.PI * 2);
-      g.stroke();
-    }
+    if (!c.current) continue;
+    g.strokeStyle = '#ffd36b';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(sx(c.x), sy(c.z), size / 40, 0, Math.PI * 2);
+    g.stroke();
   }
-  icon(KING_ARENA.x, KING_ARENA.z, '♛', data.kingDefeated ? '#7a7a7a' : '#d9b24a', size / 20);
-  label(KING_ARENA.x, KING_ARENA.z + 2, data.kingDefeated ? 'Crypt (cleared)' : 'Crypt of the Zombie King');
+  for (const t of TERRITORIES) {
+    const free = data.liberated[t.id];
+    icon(t.arena.x, t.arena.z, LEADER_ICON[t.id], free ? '#7a7a7a' : '#d9b24a', size / 20);
+    label(t.arena.x, t.arena.z, free ? `${t.leader.title} (defeated)` : t.leader.title);
+  }
 
   if (data.objective) {
     g.strokeStyle = 'rgba(255, 211, 107, 0.9)';

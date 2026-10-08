@@ -77,6 +77,7 @@ export class Hud {
   private readonly xpFill = $('xp-fill');
   private readonly xpText = $('xp-text');
   private readonly kills = $('kills');
+  private readonly slowed = $('slowed');
   private readonly vignette = $('vignette');
   private readonly objective = $('objective');
   private readonly boss = $('boss');
@@ -387,7 +388,8 @@ export class Hud {
     this.stBar.classList.toggle('low', player.stamina < 22);
     this.xpFill.style.width = player.atMaxLevel ? '100%' : `${(player.xp / player.xpToNext) * 100}%`;
     this.xpText.textContent = player.atMaxLevel ? 'Max level' : `${player.xp} / ${player.xpToNext} XP`;
-    this.kills.textContent = `Undead slain: ${kills}`;
+    this.kills.textContent = `Enemies slain: ${kills}`;
+    this.slowed.classList.toggle('hidden', player.slowTimer <= 0);
     this.vignette.style.opacity = String(player.hurtFlash);
   }
 }

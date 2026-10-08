@@ -7,7 +7,7 @@ import { dampAngle, easeInOutQuad, easeOutCubic, lerp, smoothing, wrapAngle } fr
 import { sfx } from './audio';
 import { MAX_LEVEL, statsForLevel, xpToNext } from './progression';
 
-type State = 'move' | 'attack' | 'roll' | 'stagger' | 'dead';
+type State = 'move' | 'attack' | 'roll' | 'stagger' | 'grabbed' | 'dead';
 
 /** One swing of the 3-hit combo. Times are fractions of `dur`. */
 interface Swing {
@@ -53,6 +53,8 @@ const PLAYER_LOOK = {
 };
 
 const HURT_COLOR = new THREE.Color(0xff2020);
+const SLOW_COLOR = new THREE.Color(0x9a4aff);
+const SLOW_FACTOR = 0.55;
 
 export class Player implements Target {
   readonly h: Humanoid;
@@ -75,6 +77,8 @@ export class Player implements Target {
   blocking = false;
   /** 1 right after taking damage, fades to 0 (drives the red screen vignette). */
   hurtFlash = 0;
+  /** Seconds left of a witch's slowing hex. */
+  slowTimer = 0;
 
   state: State = 'move';
   stateTime = 0;
@@ -92,6 +96,7 @@ export class Player implements Target {
   private attackBuffer = 0;
   private rollBuffer = 0;
 
+  private readonly holdPoint = new THREE.Vector3();
   private readonly wish = new THREE.Vector3();
   private readonly target = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
@@ -160,6 +165,7 @@ export class Player implements Target {
     this.hp = this.maxHp;
     this.stamina = this.maxStamina;
     this.hurtFlash = 0;
+    this.slowTimer = 0;
     this.setState('move');
   }
 
@@ -191,7 +197,7 @@ export class Player implements Target {
           this.stamina = Math.max(0, this.stamina - 22 * dt);
           this.staminaDelay = 0.5;
         }
-        target.copy(wish).multiplyScalar(this.blocking ? 2.2 : this.sprinting ? 8.2 : 5);
+        target.copy(wish).multiplyScalar((this.blocking ? 2.2 : this.sprinting ? 8.2 : 5) * (this.slowTimer > 0 ? SLOW_FACTOR : 1));
         if (this.rollBuffer > 0 && this.stamina >= ROLL_STAMINA) this.startRoll(wish.lengthSq() > 0 ? wish : forward);
         else if (this.attackBuffer > 0 && this.stamina > 0) this.startAttack(0);
         break;
@@ -232,6 +238,13 @@ export class Player implements Target {
         accel = 6;
         if (this.stateTime >= this.staggerDuration) this.setState('move');
         break;
+      case 'grabbed':
+        // Held in a vampire's grip: pulled to the hold point, helpless.
+        this.vel.set(0, 0, 0);
+        this.pos.x += (this.holdPoint.x - this.pos.x) * smoothing(15, dt);
+        this.pos.z += (this.holdPoint.z - this.pos.z) * smoothing(15, dt);
+        accel = 0;
+        break;
       case 'dead':
         accel = 5;
         break;
@@ -253,6 +266,7 @@ export class Player implements Target {
     // Slow health regen once out of combat for a while.
     if (this.alive && this.sinceHurt > 6) this.hp = Math.min(this.maxHp, this.hp + 4 * dt);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.5);
+    this.slowTimer = Math.max(0, this.slowTimer - dt);
 
     this.animate(dt);
   }
@@ -288,14 +302,39 @@ export class Player implements Target {
     ctx.addShake(0.45);
     ctx.particles.burst(this.tmp.set(this.pos.x, this.pos.y + 1.2, this.pos.z), 0x8a0f0f, 8, 3);
     sfx.hurt();
-    this.vel.copy(away).multiplyScalar(5);
     if (this.hp <= 0) {
+      this.vel.copy(away).multiplyScalar(5);
       this.setState('dead');
-    } else {
+    } else if (this.state !== 'grabbed') {
+      this.vel.copy(away).multiplyScalar(5);
       this.staggerDuration = 0.35;
       this.setState('stagger');
     }
     return 'hit';
+  }
+
+  /** A hex orb's curse: move at about half speed for a while. */
+  applySlow(seconds: number) {
+    this.slowTimer = Math.max(this.slowTimer, seconds);
+  }
+
+  /** Seized by the Vampire Lord. */
+  startGrab() {
+    this.holdPoint.copy(this.pos);
+    this.setState('grabbed');
+  }
+
+  /** Where the grabber is holding the hero this frame. */
+  holdAt(x: number, z: number) {
+    this.holdPoint.set(x, 0, z);
+  }
+
+  /** Thrown free of a grab. */
+  release(dir: THREE.Vector3) {
+    if (this.state !== 'grabbed') return;
+    this.vel.copy(dir).multiplyScalar(7);
+    this.staggerDuration = 0.5;
+    this.setState('stagger');
   }
 
   private setState(state: State) {
@@ -328,7 +367,7 @@ export class Player implements Target {
 
   private checkHits(sw: Swing, ctx: GameContext) {
     for (const e of ctx.enemies) {
-      if (!e.alive || this.swingHits.has(e)) continue;
+      if (!e.alive || e.flying || this.swingHits.has(e)) continue;
       const dx = e.pos.x - this.pos.x;
       const dz = e.pos.z - this.pos.z;
       const dist = Math.hypot(dx, dz);
@@ -339,7 +378,16 @@ export class Player implements Target {
         ctx.addShake(sw.heavy ? 0.5 : 0.28);
       }
       this.swingHits.add(e);
-      e.takeHit(Math.round(sw.damage * this.damageMultiplier), new THREE.Vector3(dx, 0, dz).normalize(), sw.knockback, sw.heavy, ctx, this);
+      const dir = new THREE.Vector3(dx, 0, dz).normalize();
+      if (e.takeHit(Math.round(sw.damage * this.damageMultiplier), dir, sw.knockback, sw.heavy, ctx, this) === 'parried') {
+        // Knocked back by a parry: the swing ends and the hero reels.
+        ctx.floatText(new THREE.Vector3(e.pos.x, e.pos.y + 2, e.pos.z), 'Parried!', 'damage');
+        ctx.addShake(0.2);
+        this.vel.copy(dir).multiplyScalar(-4);
+        this.staggerDuration = 0.45;
+        this.setState('stagger');
+        return;
+      }
     }
   }
 
@@ -406,6 +454,18 @@ export class Player implements Target {
         h.armL.rotation.set(-0.5, 0, 0.6);
         h.armR.rotation.set(-0.5, 0, -0.6);
         break;
+      case 'grabbed': {
+        // Lifted off the ground, struggling.
+        const kick = Math.sin(this.stateTime * 14);
+        h.hips.position.y = HIPS_HEIGHT + 0.25;
+        h.torso.rotation.x = -0.25;
+        h.head.rotation.x = -0.4;
+        h.armL.rotation.set(-1.2 + kick * 0.3, 0, 0.5);
+        h.armR.rotation.set(-1.2 - kick * 0.3, 0, -0.5);
+        h.legL.rotation.x = kick * 0.5;
+        h.legR.rotation.x = -kick * 0.5;
+        break;
+      }
       case 'dead': {
         const t = easeOutCubic(Math.min(this.stateTime / 0.7, 1));
         h.hips.rotation.x = -1.45 * t;
@@ -417,7 +477,8 @@ export class Player implements Target {
       }
     }
 
-    setFlash(h, HURT_COLOR, this.hurtFlash * 0.6);
+    if (this.hurtFlash < 0.05 && this.slowTimer > 0) setFlash(h, SLOW_COLOR, 0.2 + 0.1 * Math.sin(this.stateTime * 8));
+    else setFlash(h, HURT_COLOR, this.hurtFlash * 0.6);
   }
 
   /** Windup → strike → recover, sweeping the sword arm from `from` to `to`. */

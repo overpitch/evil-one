@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid } from './character';
-import type { Zombie } from './enemy';
+import type { Enemy } from './enemy';
 import type { GameContext, HitResult, Target } from './types';
 import { heightAt, resolveColliders } from './world';
 import { clamp, dampAngle, easeOutCubic, lerp, smoothing, wrapAngle } from './util';
@@ -36,7 +36,7 @@ export class Ally implements Target {
   state: State = 'gone';
   stateTime = 0;
 
-  private target: Zombie | null = null;
+  private target: Enemy | null = null;
   private retargetTimer = 0;
   private struck = false;
   private recoverTime = RECOVER;
@@ -99,7 +99,7 @@ export class Ally implements Target {
       this.retargetTimer = 0.5;
       this.target = this.findTarget(ctx);
     }
-    if (this.target && !this.target.alive) this.target = null;
+    if (this.target && (!this.target.alive || this.target.flying)) this.target = null;
 
     const t = this.target;
     const dx = t ? t.pos.x - this.pos.x : 0;
@@ -146,7 +146,7 @@ export class Ally implements Target {
           this.struck = true;
           sfx.swing(false, volumeAt(this.pos.distanceTo(player.pos)) * 0.4);
           if (t && dist < 2.3 + t.radius && Math.abs(wrapAngle(toTargetYaw - this.yaw)) < 1.1) {
-            t.takeHit(10 + 2 * player.level, new THREE.Vector3(dx / dist, 0, dz / dist), 3, false, ctx, this);
+            t.takeHit(Math.round(8 + 1.5 * player.level), new THREE.Vector3(dx / dist, 0, dz / dist), 3, false, ctx, this);
           }
         }
         if (this.stateTime >= 0.18) {
@@ -195,7 +195,8 @@ export class Ally implements Target {
       ctx.particles.burst(new THREE.Vector3(this.pos.x + (dx / d) * 0.6, this.pos.y + 1.4, this.pos.z + (dz / d) * 0.6), 0xffd36b, 8, 4);
       return 'blocked';
     }
-    this.hp -= amount;
+    // Soldiers can't dodge, so area attacks (meteors, shockwaves) hurt them less.
+    this.hp -= unblockable ? amount * 0.5 : amount;
     this.hurtFlash = 1;
     this.vel.set(-dx / d, 0, -dz / d).multiplyScalar(4);
     ctx.particles.burst(new THREE.Vector3(this.pos.x, this.pos.y + 1.2, this.pos.z), 0x8a0f0f, 6, 3);
@@ -210,12 +211,12 @@ export class Ally implements Target {
     return 'hit';
   }
 
-  private findTarget(ctx: GameContext): Zombie | null {
+  private findTarget(ctx: GameContext): Enemy | null {
     if (ctx.peaceful) return null;
-    let best: Zombie | null = null;
+    let best: Enemy | null = null;
     let bestDist = ENGAGE_RANGE;
     for (const z of ctx.enemies) {
-      if (!z.alive || z.state === 'rising') continue;
+      if (!z.alive || z.state === 'rising' || z.flying || !z.fightActive) continue;
       if (z.pos.distanceTo(ctx.player.pos) > LEASH) continue;
       const d = z.pos.distanceTo(this.pos);
       if (d < bestDist) {

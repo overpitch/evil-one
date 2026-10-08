@@ -102,6 +102,17 @@ body {
   text-shadow: 0 1px 2px #000;
 }
 
+.status-effect {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #f2e6ff;
+  background: rgba(110, 50, 170, 0.75);
+  border-radius: 3px;
+}
+
 .bar.stamina.low {
   border-color: rgba(255, 90, 60, 0.8);
 }

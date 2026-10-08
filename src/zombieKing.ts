@@ -1,15 +1,18 @@
 import * as THREE from 'three';
-import { Zombie, type ZombieStats } from './enemy';
+import type { EnemyStats } from './enemy';
+import { Zombie } from './zombies';
 import type { Humanoid } from './character';
 import type { GameContext, Target } from './types';
-import { KING_ARENA } from './layout';
+import { ZOMBIE_LAND } from './layout';
 import { XP_REWARD } from './progression';
 import { easeInOutQuad, lerp } from './util';
 import { heightAt } from './world';
 import { sfx } from './audio';
 
-const KING_STATS: ZombieStats = {
-  hp: 1600,
+const KING_ARENA = ZOMBIE_LAND.arena;
+
+const KING_STATS: EnemyStats = {
+  hp: 1400,
   speed: 2.6,
   damage: 22,
   knockback: 8,
@@ -86,9 +89,6 @@ class Shockwave {
  * - Enrage: below 1/3 health it moves and swings faster.
  */
 export class ZombieKing extends Zombie {
-  readonly title = 'The Zombie King';
-  /** The arena fight has started; until then the king sits on his throne. */
-  fightActive = false;
   enraged = false;
 
   private summonAt: number[] = [];
@@ -112,7 +112,7 @@ export class ZombieKing extends Zombie {
         eyes: 0xff3b2f,
         glowingEyes: true,
       },
-      XP_REWARD.zombieKing,
+      XP_REWARD['zombie-king'],
     );
     this.showWorldBar = false;
     this.wanderRadius = 0;
@@ -142,10 +142,6 @@ export class ZombieKing extends Zombie {
     scene.add(this.landingMarker);
   }
 
-  get healthFraction() {
-    return this.hp / this.maxHp;
-  }
-
   override spawn(x: number, z: number, rise = false) {
     super.spawn(x, z, rise);
     this.fightActive = false;
@@ -168,14 +164,6 @@ export class ZombieKing extends Zombie {
   override update(dt: number, ctx: GameContext) {
     super.update(dt, ctx);
     this.shockwave.update(dt, ctx);
-  }
-
-  protected override chooseTarget(ctx: GameContext) {
-    if (!this.fightActive) {
-      this.target = null;
-      return;
-    }
-    super.chooseTarget(ctx);
   }
 
   protected override think(dt: number, ctx: GameContext, dx: number, dz: number, dist: number) {
@@ -255,20 +243,26 @@ export class ZombieKing extends Zombie {
     }
   }
 
-  protected override poseSpecial(h: Humanoid): number | 'posed' | null {
+  protected override canBeStaggered() {
+    return super.canBeStaggered() && this.state !== 'leap' && this.state !== 'roar';
+  }
+
+  protected override pose(h: Humanoid, step: number) {
     if (this.state === 'leap') {
       const t = Math.min(this.stateTime / LEAP_TIME, 1);
       h.legL.rotation.x = h.legR.rotation.x = -0.9 * Math.sin(t * Math.PI);
       h.torso.rotation.x = -0.2;
-      return -2.9; // both fists raised overhead
+      h.armL.rotation.set(-2.9, 0, 0.1); // both fists raised overhead
+      h.armR.rotation.set(-2.9, 0, -0.1);
+      return;
     }
     if (this.state === 'roar') {
       h.torso.rotation.x = -0.35;
       h.head.rotation.set(-0.6, 0, 0);
       h.armL.rotation.set(-0.4, 0, 1.3);
       h.armR.rotation.set(-0.4, 0, -1.3);
-      return 'posed';
+      return;
     }
-    return null;
+    super.pose(h, step);
   }
 }

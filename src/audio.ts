@@ -37,6 +37,7 @@ function envelope(a: AudioContext, t: number, peak: number, attack: number, deca
 function noiseSource(a: AudioContext, t: number, dur: number) {
   const src = a.createBufferSource();
   src.buffer = noise;
+  src.loop = true;
   src.start(t, Math.random() * 0.5);
   src.stop(t + dur);
   return src;
@@ -150,6 +151,71 @@ export const sfx = {
   roar() {
     groanVoice(1, 55, 38, 1.8);
     groanVoice(0.7, 82, 50, 1.6);
+  },
+
+  /** A witch's cackle: a high voice chopped into "ha-ha-ha". */
+  cackle(vol = 1) {
+    const a = ready();
+    if (!a || vol < 0.03) return;
+    const t = a.currentTime;
+    const dur = 0.9;
+    const voice = tone(a, 'sawtooth', 720 + Math.random() * 120, 460, t, dur);
+    const formant = filter(a, 'bandpass', 1400, 4);
+    const chop = a.createGain();
+    chop.gain.value = 0;
+    const lfo = tone(a, 'square', 7.5, 7.5, t, dur);
+    const depth = a.createGain();
+    depth.gain.value = 0.5;
+    lfo.connect(depth).connect(chop.gain);
+    voice.connect(formant).connect(chop).connect(envelope(a, t, 0.32 * vol, 0.03, dur));
+  },
+
+  /** Vampire hiss. */
+  hiss(vol = 1) {
+    const a = ready();
+    if (!a || vol < 0.03) return;
+    const t = a.currentTime;
+    noiseSource(a, t, 0.6).connect(filter(a, 'highpass', 2600)).connect(envelope(a, t, 0.3 * vol, 0.06, 0.5));
+  },
+
+  /** A witch's dying shriek, also the broom-witch dive warning. */
+  screech(vol = 1) {
+    const a = ready();
+    if (!a || vol < 0.03) return;
+    const t = a.currentTime;
+    tone(a, 'sawtooth', 1300, 700, t, 0.6).connect(filter(a, 'bandpass', 1800, 3)).connect(envelope(a, t, 0.25 * vol, 0.02, 0.6));
+  },
+
+  /** Spell launch: a rising shimmer. */
+  cast(vol = 1) {
+    const a = ready();
+    if (!a || vol < 0.03) return;
+    const t = a.currentTime;
+    tone(a, 'sine', 300, 1100, t, 0.3).connect(envelope(a, t, 0.18 * vol, 0.02, 0.3));
+    noiseSource(a, t, 0.3).connect(filter(a, 'bandpass', 3000, 2)).connect(envelope(a, t, 0.12 * vol, 0.02, 0.25));
+  },
+
+  /** Meteor impact. */
+  explode(vol = 1) {
+    const a = ready();
+    if (!a || vol < 0.03) return;
+    const t = a.currentTime;
+    tone(a, 'sine', 90, 30, t, 0.5).connect(envelope(a, t, 0.9 * vol, 0.005, 0.5));
+    noiseSource(a, t, 0.6).connect(filter(a, 'lowpass', 600)).connect(envelope(a, t, 0.6 * vol, 0.005, 0.55));
+  },
+
+  /** A flurry of wings. */
+  bats(vol = 1) {
+    const a = ready();
+    if (!a || vol < 0.03) return;
+    const t = a.currentTime;
+    const flutter = a.createGain();
+    flutter.gain.value = 0;
+    const lfo = tone(a, 'square', 22, 22, t, 1.4);
+    const depth = a.createGain();
+    depth.gain.value = 0.5;
+    lfo.connect(depth).connect(flutter.gain);
+    noiseSource(a, t, 1.4).connect(filter(a, 'bandpass', 900, 1.5)).connect(flutter).connect(envelope(a, t, 0.35 * vol, 0.1, 1.2));
   },
 
   /** vol is 0..1, usually from distance to the listener. */

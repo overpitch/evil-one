@@ -41,15 +41,22 @@ Open http://localhost:5173/?test to skip the menus and play without pointer lock
 | File | What it does |
 |---|---|
 | `src/main.ts` | Setup, game loop, menu flow, saving, body separation |
-| `src/campaign.ts` | Outposts, checkpoints, patrol, boss fight, objectives |
-| `src/layout.ts` | Where everything is in the world |
-| `src/player.ts` | Hero movement, combat (combo, block, roll), animation |
+| `src/campaign.ts` | The three territories: outposts, checkpoints, patrols, leader fights, objectives |
+| `src/layout.ts` | Where everything is in the world, which enemies are where, leader names and lines |
+| `src/player.ts` | Hero movement, combat (combo, block, roll), hexes and grabs, animation |
 | `src/ally.ts` | Allied soldiers: formation, fighting, reinforcements |
-| `src/enemy.ts` | Zombie kinds, AI, packs and animation |
-| `src/zombieKing.ts` | The Zombie King boss: ground pound, summons, enrage |
+| `src/enemy.ts` | Shared enemy body: movement, targeting, taking hits, packs, health bars |
+| `src/enemies.ts` | Creates any enemy or leader by name |
+| `src/zombies.ts` | Zombie army: shamblers, runners, brutes |
+| `src/witches.ts` | Witch army: hexers, broom-witches, the queen's mirror images |
+| `src/vampires.ts` | Vampire army: thralls, vampire knights |
+| `src/zombieKing.ts` | The Zombie King: ground pound, summons, enrage |
+| `src/witchQueen.ts` | The Witch Queen: flight, meteor rain, exhaustion, mirror images |
+| `src/vampireLord.ts` | The Vampire Lord: combos, parries, life-drain grab, bat form |
+| `src/projectiles.ts` | Fire bolts, hex orbs and meteors |
 | `src/character.ts` | Blocky humanoid model and pose helpers |
 | `src/camera.ts` | Over-the-shoulder camera, screen shake, invert look |
-| `src/world.ts` | Terrain, scenery, camp, ruins, arena, lighting, collisions |
+| `src/world.ts` | Terrain, three biomes, camp, outposts, arenas, lighting, collisions |
 | `src/banner.ts` | Checkpoint banners |
 | `src/particles.ts` | Blood, dust and spark particles |
 | `src/audio.ts` | Synthesized sound effects |

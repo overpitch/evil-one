@@ -1,9 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { clamp, lerp, mulberry32, smoothing } from './util';
-import {
-  HUMAN_CAMP, KING_ARENA, KING_THRONE, STRONGHOLD_GATE, VILLAGE_RUINS, ZOMBIE_LAND, ZOMBIE_OUTPOSTS,
-} from './layout';
+import { clamp, mulberry32, smoothing } from './util';
+import { HUMAN_CAMP, TERRITORIES, VILLAGE_RUINS, type OutpostDef, type TerritoryDef, type TerritoryId } from './layout';
 
 export const WORLD_HALF = 150;
 
@@ -28,17 +26,27 @@ export interface Colliders {
   boxes: Box[];
 }
 
+export interface Gate {
+  open(): void;
+  close(): void;
+}
+
 const smoothstep = (e0: number, e1: number, x: number) => {
   const t = clamp((x - e0) / (e1 - e0), 0, 1);
   return t * t * (3 - 2 * t);
 };
 
-/** Areas kept flat for camps and arenas: [x, z, radius]. */
+const dirX = (angle: number) => Math.sin(angle);
+const dirZ = (angle: number) => Math.cos(angle);
+
+/** Areas kept flat for camps, outposts and arenas: [x, z, radius]. */
 const FLAT_ZONES: [number, number, number][] = [
   [HUMAN_CAMP.x, HUMAN_CAMP.z, 18],
-  ...ZOMBIE_OUTPOSTS.map((o): [number, number, number] => [o.x, o.z, o.flatRadius]),
-  [KING_ARENA.x, KING_ARENA.z, KING_ARENA.r + 6],
-  [STRONGHOLD_GATE.x, STRONGHOLD_GATE.z, 6],
+  ...TERRITORIES.flatMap((t): [number, number, number][] => [
+    ...t.outposts.map((o): [number, number, number] => [o.x, o.z, o.flatRadius]),
+    [t.arena.x, t.arena.z, t.arena.r + 6],
+    [t.gate.x, t.gate.z, 6],
+  ]),
 ];
 
 /** Terrain height: rolling hills, flattened around camps and arenas. */
@@ -58,19 +66,35 @@ export function heightAt(x: number, z: number): number {
   return h * flat;
 }
 
-/** 0 outside the zombie territory, 1 deep inside it. */
-export function zombieLandWeight(x: number, z: number) {
-  return 1 - smoothstep(ZOMBIE_LAND.r - 20, ZOMBIE_LAND.r + 5, Math.hypot(x - ZOMBIE_LAND.x, z - ZOMBIE_LAND.z));
+/** 0 outside a territory, 1 deep inside it. */
+export function territoryWeight(t: TerritoryDef, x: number, z: number) {
+  const { center } = t;
+  return 1 - smoothstep(center.r - 20, center.r + 5, Math.hypot(x - center.x, z - center.z));
 }
 
-/** Keeps scenery out of camps, outposts and the arena. */
+/** The territory a point mostly belongs to (if any) and how strongly. */
+function biomeAt(x: number, z: number): { id: TerritoryId | null; weight: number } {
+  let best: TerritoryId | null = null;
+  let weight = 0;
+  for (const t of TERRITORIES) {
+    const w = territoryWeight(t, x, z);
+    if (w > weight) {
+      weight = w;
+      best = t.id;
+    }
+  }
+  return { id: best, weight };
+}
+
+/** Keeps scenery out of camps, outposts, gates and arenas. */
 function nearLandmark(x: number, z: number) {
   const near = (px: number, pz: number, r: number) => Math.hypot(x - px, z - pz) < r;
-  return (
-    near(HUMAN_CAMP.x, HUMAN_CAMP.z, 22) ||
-    ZOMBIE_OUTPOSTS.some((o) => near(o.x, o.z, o.flatRadius - 1)) ||
-    near(KING_ARENA.x, KING_ARENA.z, KING_ARENA.r + 9) ||
-    near(STRONGHOLD_GATE.x, STRONGHOLD_GATE.z, 7)
+  if (near(HUMAN_CAMP.x, HUMAN_CAMP.z, 22)) return true;
+  return TERRITORIES.some(
+    (t) =>
+      t.outposts.some((o) => near(o.x, o.z, o.flatRadius - 1)) ||
+      near(t.arena.x, t.arena.z, t.arena.r + 10) ||
+      near(t.gate.x, t.gate.z, 7),
   );
 }
 
@@ -117,10 +141,34 @@ export function lambert(color: number | THREE.Color = 0xffffff, extra: THREE.Mes
   return new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
 }
 
-const SKY = new THREE.Color(0x9fc6e8);
-const GLOOM_SKY = new THREE.Color(0x7f8a7c);
-const SUN_COLOR = new THREE.Color(0xfff1d6);
-const GLOOM_SUN = new THREE.Color(0xc9d6b8);
+/** Adds a shadow-casting mesh at a world position, resting on the ground. */
+function place(scene: THREE.Scene, geo: THREE.BufferGeometry, mat: THREE.Material, x: number, z: number, y = 0, rotY = 0) {
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, heightAt(x, z) + y, z);
+  mesh.rotation.y = rotY;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  return mesh;
+}
+
+// ---------- Atmosphere ----------
+
+interface Mood {
+  sky: THREE.Color;
+  fogNear: number;
+  fogFar: number;
+  hemi: number;
+  sun: number;
+  sunColor: THREE.Color;
+}
+
+const NORMAL: Mood = { sky: new THREE.Color(0x9fc6e8), fogNear: 50, fogFar: 170, hemi: 1.6, sun: 2.6, sunColor: new THREE.Color(0xfff1d6) };
+const MOODS: Record<TerritoryId, Mood> = {
+  zombie: { sky: new THREE.Color(0x7f8a7c), fogNear: 16, fogFar: 95, hemi: 1.05, sun: 1.4, sunColor: new THREE.Color(0xc9d6b8) },
+  witch: { sky: new THREE.Color(0x6a5a82), fogNear: 14, fogFar: 85, hemi: 1.0, sun: 1.2, sunColor: new THREE.Color(0xd0b8f0) },
+  vampire: { sky: new THREE.Color(0x262a44), fogNear: 18, fogFar: 100, hemi: 0.75, sun: 1.1, sunColor: new THREE.Color(0x9fb0ff) },
+};
 
 export type World = ReturnType<typeof createWorld>;
 
@@ -128,14 +176,14 @@ export function createWorld(scene: THREE.Scene) {
   const rand = mulberry32(1337);
   const colliders: Colliders = { circles: [], boxes: [] };
 
-  const background = SKY.clone();
+  const background = NORMAL.sky.clone();
   scene.background = background;
-  const fog = new THREE.Fog(background, 50, 170);
+  const fog = new THREE.Fog(background, NORMAL.fogNear, NORMAL.fogFar);
   scene.fog = fog;
 
-  const hemi = new THREE.HemisphereLight(0xdbeaff, 0x55663a, 1.6);
+  const hemi = new THREE.HemisphereLight(0xdbeaff, 0x55663a, NORMAL.hemi);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(SUN_COLOR, 2.6);
+  const sun = new THREE.DirectionalLight(NORMAL.sunColor, NORMAL.sun);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, { left: -35, right: 35, top: 35, bottom: -35, near: 1, far: 150 });
@@ -148,41 +196,82 @@ export function createWorld(scene: THREE.Scene) {
   addTrees(scene, rand, colliders);
   addRocks(scene, rand, colliders);
   addGravestones(scene, rand, colliders);
-  for (const [ox, oz, hw, hd] of VILLAGE_RUINS) {
-    const village = ZOMBIE_OUTPOSTS[1];
-    addRuin(scene, rand, colliders, village.x + ox, village.z + oz, hw, hd);
+  addMushrooms(scene, rand);
+  addPools(scene, rand);
+  addSpires(scene, rand, colliders);
+  const animated: ((time: number) => void)[] = [addCamp(scene, colliders)];
+  for (const t of TERRITORIES) {
+    for (const o of t.outposts) {
+      const anim = addOutpostDecor(scene, rand, colliders, o);
+      if (anim) animated.push(anim);
+    }
   }
-  addBonePiles(scene, rand);
-  const campfire = addCamp(scene, colliders);
-  const gate = addArena(scene, colliders);
+  const gates = {} as Record<TerritoryId, Gate>;
+  for (const t of TERRITORIES) gates[t.id] = addArena(scene, rand, colliders, t);
 
-  let gloom = 0;
+  const gloom: Record<TerritoryId, number> = { zombie: 0, witch: 0, vampire: 0 };
   let time = 0;
 
   return {
     colliders,
-    gate,
+    gates,
     /**
      * Follows the player with the sun's shadow camera and blends the sky,
-     * fog and light toward a sickly gloom inside enemy territory.
+     * fog and light toward each enemy land's mood.
      */
-    update(focus: THREE.Vector3, dt: number, gloomTarget: number) {
+    update(focus: THREE.Vector3, dt: number, gloomTarget: Record<TerritoryId, number>) {
       time += dt;
       sun.position.copy(focus).add(sunOffset);
       sun.target.position.copy(focus);
 
-      gloom += (gloomTarget - gloom) * smoothing(1.5, dt);
-      background.copy(SKY).lerp(GLOOM_SKY, gloom);
-      fog.near = lerp(50, 16, gloom);
-      fog.far = lerp(170, 95, gloom);
-      hemi.intensity = lerp(1.6, 1.05, gloom);
-      sun.intensity = lerp(2.6, 1.4, gloom);
-      sun.color.copy(SUN_COLOR).lerp(GLOOM_SUN, gloom);
+      let total = 0;
+      for (const t of TERRITORIES) {
+        gloom[t.id] += (gloomTarget[t.id] - gloom[t.id]) * smoothing(1.5, dt);
+        total += gloom[t.id];
+      }
+      const base = Math.max(0, 1 - total);
+      background.copy(NORMAL.sky).multiplyScalar(base);
+      sun.color.copy(NORMAL.sunColor).multiplyScalar(base);
+      let fogNear = NORMAL.fogNear * base;
+      let fogFar = NORMAL.fogFar * base;
+      let hemiI = NORMAL.hemi * base;
+      let sunI = NORMAL.sun * base;
+      for (const t of TERRITORIES) {
+        const w = gloom[t.id];
+        const m = MOODS[t.id];
+        background.r += m.sky.r * w;
+        background.g += m.sky.g * w;
+        background.b += m.sky.b * w;
+        sun.color.r += m.sunColor.r * w;
+        sun.color.g += m.sunColor.g * w;
+        sun.color.b += m.sunColor.b * w;
+        fogNear += m.fogNear * w;
+        fogFar += m.fogFar * w;
+        hemiI += m.hemi * w;
+        sunI += m.sun * w;
+      }
+      const norm = Math.max(1, total);
+      background.multiplyScalar(1 / norm);
+      sun.color.multiplyScalar(1 / norm);
+      fog.near = fogNear / norm;
+      fog.far = fogFar / norm;
+      hemi.intensity = hemiI / norm;
+      sun.intensity = sunI / norm;
 
-      campfire.update(time);
+      for (const a of animated) a(time);
     },
   };
 }
+
+// ---------- Ground ----------
+
+const GROUND_COLORS: Record<TerritoryId, [number, number, number]> = {
+  // [base A, base B, patches]
+  zombie: [0x6e6a42, 0x857b4c, 0x4e4232],
+  witch: [0x3e5a48, 0x4d6650, 0x4a3a5a],
+  vampire: [0x3e3a3c, 0x4a4446, 0x4a2a2e],
+};
+const ARENA_FLOOR: Record<TerritoryId, number> = { zombie: 0x48433b, witch: 0x2f3a2e, vampire: 0x55505c };
 
 function createGround(rand: () => number) {
   let geo: THREE.BufferGeometry = new THREE.PlaneGeometry(WORLD_HALF * 2, WORLD_HALF * 2, 150, 150);
@@ -196,32 +285,35 @@ function createGround(rand: () => number) {
   const colors = new Float32Array(pos.count * 3);
   const grassA = new THREE.Color(0x5b8c3a);
   const grassB = new THREE.Color(0x76a64a);
-  const deadA = new THREE.Color(0x6e6a42);
-  const deadB = new THREE.Color(0x857b4c);
   const dirt = new THREE.Color(0x8a6b45);
   const mud = new THREE.Color(0x4e4232);
-  const stone = new THREE.Color(0x48433b);
   const c = new THREE.Color();
-  const dead = new THREE.Color();
+  const biome = new THREE.Color();
+  const patch = new THREE.Color();
   for (let i = 0; i < pos.count; i += 3) {
     const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3;
     const cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
     const cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
-    const w = zombieLandWeight(cx, cz);
     c.copy(grassA).lerp(grassB, rand());
-    c.lerp(dead.copy(deadA).lerp(deadB, rand()), w);
-    if (rand() < 0.12 * w) c.lerp(mud, 0.7);
+    const { id, weight } = biomeAt(cx, cz);
+    if (id) {
+      const [a, b, pt] = GROUND_COLORS[id];
+      biome.set(a).lerp(patch.set(b), rand());
+      c.lerp(biome, weight);
+      if (rand() < 0.12 * weight) c.lerp(patch.set(pt), 0.7);
+    }
     c.multiplyScalar(1 - Math.max(cy, 0) * 0.025);
 
-    // Packed dirt at the human camp, mud at outposts, dark flagstones in the arena.
+    // Packed dirt at the human camp, mud at outposts, paving in arenas.
     const campDirt = clamp((13 - Math.hypot(cx - HUMAN_CAMP.x, cz - HUMAN_CAMP.z)) / 4, 0, 1);
     if (campDirt > 0) c.lerp(dirt, campDirt * (0.75 + 0.25 * rand()));
-    for (const o of ZOMBIE_OUTPOSTS) {
-      const k = clamp((o.flatRadius - 3 - Math.hypot(cx - o.x, cz - o.z)) / 4, 0, 1);
-      if (k > 0) c.lerp(mud, k * (0.6 + 0.3 * rand()));
+    for (const t of TERRITORIES) {
+      for (const o of t.outposts) {
+        const k = clamp((o.flatRadius - 3 - Math.hypot(cx - o.x, cz - o.z)) / 4, 0, 1);
+        if (k > 0) c.lerp(mud, k * (0.5 + 0.3 * rand()));
+      }
+      if (Math.hypot(cx - t.arena.x, cz - t.arena.z) < t.arena.r + 1) c.set(ARENA_FLOOR[t.id]).multiplyScalar(0.85 + rand() * 0.3);
     }
-    const arenaDist = Math.hypot(cx - KING_ARENA.x, cz - KING_ARENA.z);
-    if (arenaDist < KING_ARENA.r + 1) c.copy(stone).multiplyScalar(0.85 + rand() * 0.3);
     for (let k = 0; k < 3; k++) c.toArray(colors, (i + k) * 3);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -231,56 +323,75 @@ function createGround(rand: () => number) {
   return ground;
 }
 
+// ---------- Scattered scenery ----------
+
 function deadTreeGeometry() {
-  const parts = [
+  return mergeGeometries([
     new THREE.CylinderGeometry(0.12, 0.26, 3.4, 5).translate(0, 1.7, 0),
     new THREE.CylinderGeometry(0.04, 0.09, 1.5, 4).translate(0, 0.75, 0).rotateZ(0.9).translate(0, 2.1, 0),
     new THREE.CylinderGeometry(0.04, 0.08, 1.2, 4).translate(0, 0.6, 0).rotateZ(-0.8).rotateY(1.3).translate(0, 2.6, 0),
     new THREE.CylinderGeometry(0.03, 0.07, 1.0, 4).translate(0, 0.5, 0).rotateX(0.7).rotateY(-0.6).translate(0, 3.0, 0),
-  ];
-  return mergeGeometries(parts)!;
+  ])!;
+}
+
+/** A random spot in the open world (not in a landmark). */
+function openSpot(rand: () => number, colliders: Colliders, spacing: number): [number, number] | null {
+  const x = (rand() * 2 - 1) * (WORLD_HALF - 5);
+  const z = (rand() * 2 - 1) * (WORLD_HALF - 5);
+  if (nearLandmark(x, z)) return null;
+  if (colliders.circles.some((o) => Math.hypot(o.x - x, o.z - z) < spacing)) return null;
+  return [x, z];
 }
 
 function addTrees(scene: THREE.Scene, rand: () => number, colliders: Colliders) {
-  const max = 170;
-  const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.28, 1.6, 6).translate(0, 0.8, 0), lambert(0x6b4a2f), max);
-  const lower = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 2.6, 7).translate(0, 2.6, 0), lambert(), max);
-  const upper = new THREE.InstancedMesh(new THREE.ConeGeometry(1.05, 2.0, 7).translate(0, 3.7, 0), lambert(), max);
+  const max = 260;
+  const pineTrunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.28, 1.6, 6).translate(0, 0.8, 0), lambert(0x6b4a2f), max);
+  const pineLow = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 2.6, 7).translate(0, 2.6, 0), lambert(), max);
+  const pineHigh = new THREE.InstancedMesh(new THREE.ConeGeometry(1.05, 2.0, 7).translate(0, 3.7, 0), lambert(), max);
   const dead = new THREE.InstancedMesh(deadTreeGeometry(), lambert(), max);
+  // Swamp trees: a leaning trunk under a heavy, drooping canopy.
+  const swampTrunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.35, 2.6, 6).translate(0, 1.3, 0), lambert(0x3a2e26), max);
+  const swampTop = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.7, 0).scale(1, 0.55, 1).translate(0, 3, 0), lambert(), max);
 
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
   const s = new THREE.Vector3();
   const p = new THREE.Vector3();
-  const up = new THREE.Vector3(0, 1, 0);
   const c = new THREE.Color();
-  let pines = 0;
-  let deadCount = 0;
-  for (let tries = 0; pines + deadCount < max && tries < 6000; tries++) {
-    const x = (rand() * 2 - 1) * (WORLD_HALF - 5);
-    const z = (rand() * 2 - 1) * (WORLD_HALF - 5);
-    if (nearLandmark(x, z)) continue;
-    if (colliders.circles.some((o) => Math.hypot(o.x - x, o.z - z) < 3.5)) continue;
+  const counts = { pine: 0, dead: 0, swamp: 0 };
+  for (let tries = 0; counts.pine + counts.dead + counts.swamp < max && tries < 8000; tries++) {
+    const spot = openSpot(rand, colliders, 3.5);
+    if (!spot) continue;
+    const [x, z] = spot;
     const sc = 0.8 + rand() * 0.7;
-    m.compose(p.set(x, heightAt(x, z) - 0.1, z), q.setFromAxisAngle(up, rand() * Math.PI * 2), s.set(sc, sc * (0.9 + rand() * 0.3), sc));
-    if (zombieLandWeight(x, z) > 0.5) {
-      dead.setMatrixAt(deadCount, m);
-      dead.setColorAt(deadCount, c.setHSL(0.08, 0.12, 0.22 + rand() * 0.1));
-      deadCount++;
+    const { id, weight } = biomeAt(x, z);
+    const lean = id === 'witch' ? 0.18 : 0;
+    m.compose(p.set(x, heightAt(x, z) - 0.1, z), q.setFromEuler(e.set((rand() - 0.5) * lean, rand() * Math.PI * 2, (rand() - 0.5) * lean)), s.set(sc, sc * (0.9 + rand() * 0.3), sc));
+    if (weight > 0.5 && id === 'witch') {
+      swampTrunk.setMatrixAt(counts.swamp, m);
+      swampTop.setMatrixAt(counts.swamp, m);
+      swampTop.setColorAt(counts.swamp, c.setHSL(0.38 + rand() * 0.08, 0.3, 0.18 + rand() * 0.07));
+      counts.swamp++;
+    } else if (weight > 0.5) {
+      dead.setMatrixAt(counts.dead, m);
+      dead.setColorAt(counts.dead, id === 'vampire' ? c.setHSL(0.98, 0.15, 0.1 + rand() * 0.06) : c.setHSL(0.08, 0.12, 0.22 + rand() * 0.1));
+      counts.dead++;
     } else {
-      trunks.setMatrixAt(pines, m);
-      lower.setMatrixAt(pines, m);
-      upper.setMatrixAt(pines, m);
+      pineTrunk.setMatrixAt(counts.pine, m);
+      pineLow.setMatrixAt(counts.pine, m);
+      pineHigh.setMatrixAt(counts.pine, m);
       c.setHSL(0.29 + rand() * 0.07, 0.45, 0.24 + rand() * 0.08);
-      lower.setColorAt(pines, c);
-      upper.setColorAt(pines, c.offsetHSL(0, 0, 0.03));
-      pines++;
+      pineLow.setColorAt(counts.pine, c);
+      pineHigh.setColorAt(counts.pine, c.offsetHSL(0, 0, 0.03));
+      counts.pine++;
     }
     colliders.circles.push({ x, z, r: 0.35 * sc });
   }
-  trunks.count = lower.count = upper.count = pines;
-  dead.count = deadCount;
-  for (const mesh of [trunks, lower, upper, dead]) {
+  pineTrunk.count = pineLow.count = pineHigh.count = counts.pine;
+  dead.count = counts.dead;
+  swampTrunk.count = swampTop.count = counts.swamp;
+  for (const mesh of [pineTrunk, pineLow, pineHigh, dead, swampTrunk, swampTop]) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
@@ -288,7 +399,7 @@ function addTrees(scene: THREE.Scene, rand: () => number, colliders: Colliders) 
 }
 
 function addRocks(scene: THREE.Scene, rand: () => number, colliders: Colliders) {
-  const max = 70;
+  const max = 80;
   const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), lambert(), max);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -298,10 +409,9 @@ function addRocks(scene: THREE.Scene, rand: () => number, colliders: Colliders) 
   const c = new THREE.Color();
   let n = 0;
   for (let tries = 0; n < max && tries < 5000; tries++) {
-    const x = (rand() * 2 - 1) * (WORLD_HALF - 5);
-    const z = (rand() * 2 - 1) * (WORLD_HALF - 5);
-    if (nearLandmark(x, z)) continue;
-    if (colliders.circles.some((o) => Math.hypot(o.x - x, o.z - z) < 3)) continue;
+    const spot = openSpot(rand, colliders, 3);
+    if (!spot) continue;
+    const [x, z] = spot;
     const sx = 0.5 + rand() * 1.2;
     const sz = sx * (0.7 + rand() * 0.5);
     const sy = sx * (0.5 + rand() * 0.4);
@@ -317,10 +427,22 @@ function addRocks(scene: THREE.Scene, rand: () => number, colliders: Colliders) 
   scene.add(rocks);
 }
 
+/** Random point inside a territory, away from landmarks. */
+function spotIn(t: TerritoryDef, rand: () => number, colliders: Colliders, spacing: number): [number, number] | null {
+  const a = rand() * Math.PI * 2;
+  const r = Math.sqrt(rand()) * (t.center.r - 8);
+  const x = t.center.x + Math.sin(a) * r;
+  const z = t.center.z + Math.cos(a) * r;
+  if (nearLandmark(x, z)) return null;
+  if (spacing > 0 && colliders.circles.some((o) => Math.hypot(o.x - x, o.z - z) < spacing)) return null;
+  return [x, z];
+}
+
 function addGravestones(scene: THREE.Scene, rand: () => number, colliders: Colliders) {
+  const zombie = TERRITORIES[0];
   const spots: [number, number][] = [];
   // Neat rows around Gravedigger's Field, leaving the middle open for the fight.
-  const field = ZOMBIE_OUTPOSTS[0];
+  const field = zombie.outposts.find((o) => o.decor === 'graves')!;
   for (let row = -2; row <= 2; row++) {
     for (let col = -4; col <= 4; col++) {
       const x = field.x + col * 2.2 + (rand() - 0.5) * 0.4;
@@ -329,15 +451,9 @@ function addGravestones(scene: THREE.Scene, rand: () => number, colliders: Colli
       spots.push([x, z]);
     }
   }
-  // Scattered graves across the rest of the territory.
   for (let tries = 0; spots.length < 110 && tries < 3000; tries++) {
-    const a = rand() * Math.PI * 2;
-    const r = Math.sqrt(rand()) * (ZOMBIE_LAND.r - 8);
-    const x = ZOMBIE_LAND.x + Math.sin(a) * r;
-    const z = ZOMBIE_LAND.z + Math.cos(a) * r;
-    if (nearLandmark(x, z)) continue;
-    if (colliders.circles.some((o) => Math.hypot(o.x - x, o.z - z) < 1.6)) continue;
-    spots.push([x, z]);
+    const spot = spotIn(zombie, rand, colliders, 1.6);
+    if (spot) spots.push(spot);
   }
 
   const slabs = new THREE.InstancedMesh(new THREE.BoxGeometry(0.55, 0.85, 0.16).translate(0, 0.38, 0), lambert(), spots.length);
@@ -359,18 +475,100 @@ function addGravestones(scene: THREE.Scene, rand: () => number, colliders: Colli
   scene.add(slabs);
 }
 
+/** Glowing mushrooms all over the witch swamp. */
+function addMushrooms(scene: THREE.Scene, rand: () => number) {
+  const witch = TERRITORIES[1];
+  const max = 180;
+  const stems = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.05, 0.07, 0.3, 5).translate(0, 0.15, 0), lambert(0xd8d0c0), max);
+  const caps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.2, 7, 3, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 0.28, 0), new THREE.MeshBasicMaterial(), max);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const p = new THREE.Vector3();
+  const s = new THREE.Vector3();
+  const c = new THREE.Color();
+  const empty: Colliders = { circles: [], boxes: [] };
+  let n = 0;
+  for (let tries = 0; n < max && tries < 2000; tries++) {
+    const spot = spotIn(witch, rand, empty, 0);
+    if (!spot) continue;
+    // Clusters: a few around each spot.
+    const [cx, cz] = spot;
+    for (let k = 0; k < 4 && n < max; k++) {
+      const x = cx + (rand() - 0.5) * 1.6;
+      const z = cz + (rand() - 0.5) * 1.6;
+      const sc = 0.6 + rand() * 1.2;
+      m.compose(p.set(x, heightAt(x, z), z), q.identity(), s.set(sc, sc, sc));
+      stems.setMatrixAt(n, m);
+      caps.setMatrixAt(n, m);
+      caps.setColorAt(n, rand() < 0.6 ? c.setHSL(0.48, 0.9, 0.62) : c.setHSL(0.8, 0.85, 0.68));
+      n++;
+    }
+  }
+  stems.count = caps.count = n;
+  scene.add(stems, caps);
+}
+
+/** Murky pools in the swamp. */
+function addPools(scene: THREE.Scene, rand: () => number) {
+  const witch = TERRITORIES[1];
+  const mat = lambert(0x22403e, { emissive: 0x081816 });
+  const empty: Colliders = { circles: [], boxes: [] };
+  let placed = 0;
+  for (let tries = 0; placed < 14 && tries < 500; tries++) {
+    const spot = spotIn(witch, rand, empty, 0);
+    if (!spot) continue;
+    const [x, z] = spot;
+    const r = 2 + rand() * 3;
+    // Only on flat ground so the water doesn't float or sink.
+    const hs = [heightAt(x + r, z), heightAt(x - r, z), heightAt(x, z + r), heightAt(x, z - r), heightAt(x, z)];
+    if (Math.max(...hs) - Math.min(...hs) > 0.35) continue;
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(r, 9).rotateX(-Math.PI / 2), mat);
+    pool.position.set(x, Math.max(...hs) + 0.04, z);
+    pool.receiveShadow = true;
+    scene.add(pool);
+    placed++;
+  }
+}
+
+/** Jagged rock spires in the vampire hills. */
+function addSpires(scene: THREE.Scene, rand: () => number, colliders: Colliders) {
+  const vampire = TERRITORIES[2];
+  const max = 40;
+  const spires = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 5).translate(0, 0.5, 0), lambert(), max);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  const p = new THREE.Vector3();
+  const s = new THREE.Vector3();
+  const c = new THREE.Color();
+  let n = 0;
+  for (let tries = 0; n < max && tries < 2000; tries++) {
+    const spot = spotIn(vampire, rand, colliders, 4);
+    if (!spot) continue;
+    const [x, z] = spot;
+    const w = 0.8 + rand() * 1.2;
+    m.compose(p.set(x, heightAt(x, z) - 0.2, z), q.setFromEuler(e.set((rand() - 0.5) * 0.25, rand() * 6.3, (rand() - 0.5) * 0.25)), s.set(w, 3 + rand() * 5, w));
+    spires.setMatrixAt(n, m);
+    spires.setColorAt(n, c.setHSL(0.72, 0.08, 0.26 + rand() * 0.1));
+    colliders.circles.push({ x, z, r: w * 0.8 });
+    n++;
+  }
+  spires.count = n;
+  spires.castShadow = true;
+  spires.receiveShadow = true;
+  scene.add(spires);
+}
+
+// ---------- Outposts ----------
+
 /** A roofless ruined house: four broken walls with a doorway on the south side. */
-function addRuin(scene: THREE.Scene, rand: () => number, colliders: Colliders, cx: number, cz: number, hw: number, hd: number) {
-  const stone = lambert(0x7c766a);
+function addRuin(scene: THREE.Scene, rand: () => number, colliders: Colliders, cx: number, cz: number, hw: number, hd: number, stoneColor = 0x7c766a) {
+  const stone = lambert(stoneColor);
   const wood = lambert(0x5e4630);
   const t = 0.22; // half wall thickness
   const segment = (x: number, z: number, halfX: number, halfZ: number) => {
     const height = 1.1 + rand() * 1.6;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(halfX * 2, height, halfZ * 2), rand() < 0.75 ? stone : wood);
-    mesh.position.set(x, heightAt(x, z) + height / 2 - 0.05, z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    scene.add(mesh);
+    place(scene, new THREE.BoxGeometry(halfX * 2, height, halfZ * 2), rand() < 0.75 ? stone : wood, x, z, height / 2 - 0.05);
     colliders.boxes.push({ x, z, hw: halfX, hd: halfZ });
   };
   // Each wall is split into chunks of different heights so it looks broken.
@@ -391,48 +589,152 @@ function addRuin(scene: THREE.Scene, rand: () => number, colliders: Colliders, c
   wallZ(hw, -hd, hd);
 }
 
-/** Heaps of bones and skulls at the Bone Pit. */
-function addBonePiles(scene: THREE.Scene, rand: () => number) {
-  const pit = ZOMBIE_OUTPOSTS[2];
-  const bone = lambert(0xe6dcc0);
-  const boneGeo = new THREE.BoxGeometry(0.08, 0.08, 0.6);
-  const skullGeo = new THREE.BoxGeometry(0.22, 0.2, 0.24);
-  for (let pile = 0; pile < 7; pile++) {
-    const a = (pile / 7) * Math.PI * 2 + rand();
-    const r = 6 + rand() * 3;
-    const px = pit.x + Math.sin(a) * r;
-    const pz = pit.z + Math.cos(a) * r;
-    for (let i = 0; i < 9; i++) {
-      const skull = i % 4 === 0;
-      const mesh = new THREE.Mesh(skull ? skullGeo : boneGeo, bone);
-      mesh.position.set(px + (rand() - 0.5) * 1.2, heightAt(px, pz) + 0.06 + rand() * 0.25, pz + (rand() - 0.5) * 1.2);
-      mesh.rotation.set(rand() * 0.6, rand() * Math.PI, rand() * 0.6);
-      mesh.castShadow = true;
-      scene.add(mesh);
+/** Scenery for each outpost. Returns an animation callback if it has moving parts. */
+function addOutpostDecor(scene: THREE.Scene, rand: () => number, colliders: Colliders, o: OutpostDef): ((time: number) => void) | null {
+  switch (o.decor) {
+    case 'ruins':
+      for (const [ox, oz, hw, hd] of VILLAGE_RUINS) addRuin(scene, rand, colliders, o.x + ox, o.z + oz, hw, hd);
+      return null;
+    case 'bones': {
+      const bone = lambert(0xe6dcc0);
+      const boneGeo = new THREE.BoxGeometry(0.08, 0.08, 0.6);
+      const skullGeo = new THREE.BoxGeometry(0.22, 0.2, 0.24);
+      for (let pile = 0; pile < 7; pile++) {
+        const a = (pile / 7) * Math.PI * 2 + rand();
+        const r = 6 + rand() * 3;
+        const px = o.x + Math.sin(a) * r;
+        const pz = o.z + Math.cos(a) * r;
+        for (let i = 0; i < 9; i++) {
+          const mesh = place(scene, i % 4 === 0 ? skullGeo : boneGeo, bone, px + (rand() - 0.5) * 1.2, pz + (rand() - 0.5) * 1.2, 0.06 + rand() * 0.25);
+          mesh.rotation.set(rand() * 0.6, rand() * Math.PI, rand() * 0.6);
+        }
+      }
+      return null;
     }
+    case 'mushrooms': {
+      // Giant glowing toadstools ring the grove.
+      const stem = lambert(0xd8d0c0);
+      for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2 + rand() * 0.4;
+        const r = 7 + rand() * 2.5;
+        const x = o.x + Math.sin(a) * r;
+        const z = o.z + Math.cos(a) * r;
+        const sc = 2.5 + rand() * 2;
+        place(scene, new THREE.CylinderGeometry(0.12 * sc, 0.16 * sc, 0.6 * sc, 7).translate(0, 0.3 * sc, 0), stem, x, z);
+        const cap = place(
+          scene,
+          new THREE.SphereGeometry(0.42 * sc, 9, 4, 0, Math.PI * 2, 0, Math.PI / 2),
+          new THREE.MeshBasicMaterial({ color: rand() < 0.5 ? 0x5ae0d0 : 0xc070ff }),
+          x,
+          z,
+          0.55 * sc,
+        );
+        cap.castShadow = true;
+        colliders.circles.push({ x, z, r: 0.18 * sc });
+      }
+      return null;
+    }
+    case 'huts': {
+      const wall = lambert(0x4a3a2e);
+      const roof = lambert(0x3a2a3a);
+      const huts: [number, number][] = [[-9, 6], [9, 7], [0, -10]];
+      for (const [hx, hz] of huts) {
+        const x = o.x + hx;
+        const z = o.z + hz;
+        place(scene, new THREE.BoxGeometry(3, 2.4, 3).translate(0, 1.2, 0), wall, x, z);
+        const r = place(scene, new THREE.ConeGeometry(2.6, 2.4, 4).translate(0, 1.2, 0), roof, x, z, 2.3, Math.PI / 4);
+        r.rotation.z = (rand() - 0.5) * 0.3; // crooked
+        colliders.boxes.push({ x, z, hw: 1.5, hd: 1.5 });
+      }
+      // The cauldron, bubbling green.
+      place(scene, new THREE.CylinderGeometry(0.85, 0.65, 0.9, 10).translate(0, 0.45, 0), lambert(0x1a1a1e), o.x, o.z + 0.5);
+      const brew = place(scene, new THREE.CircleGeometry(0.75, 10).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x7aff6a }), o.x, o.z + 0.5, 0.86);
+      colliders.circles.push({ x: o.x, z: o.z + 0.5, r: 0.95 });
+      return (time) => brew.scale.setScalar(0.95 + Math.sin(time * 6) * 0.05);
+    }
+    case 'hangingWood': {
+      // Gallows posts with glowing cages.
+      const post = lambert(0x2e241e);
+      const glow = new THREE.MeshBasicMaterial({ color: 0x9aff7a });
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + 0.3;
+        const x = o.x + Math.sin(a) * 9;
+        const z = o.z + Math.cos(a) * 9;
+        place(scene, new THREE.BoxGeometry(0.22, 3.4, 0.22).translate(0, 1.7, 0), post, x, z);
+        place(scene, new THREE.BoxGeometry(1.4, 0.16, 0.16), post, x + Math.sin(a + Math.PI / 2) * 0.6, z + Math.cos(a + Math.PI / 2) * 0.6, 3.3, a + Math.PI / 2);
+        place(scene, new THREE.BoxGeometry(0.35, 0.45, 0.35), glow, x + Math.sin(a + Math.PI / 2) * 1.1, z + Math.cos(a + Math.PI / 2) * 1.1, 2.7);
+        colliders.circles.push({ x, z, r: 0.3 });
+      }
+      return null;
+    }
+    case 'chapel': {
+      const stone = 0x6a6470;
+      addRuin(scene, rand, colliders, o.x, o.z + 9, 3.5, 3, stone);
+      // Bell tower at the back.
+      const tx = o.x;
+      const tz = o.z + 12.5;
+      place(scene, new THREE.BoxGeometry(2.4, 7, 2.4).translate(0, 3.5, 0), lambert(stone), tx, tz);
+      place(scene, new THREE.ConeGeometry(2, 3, 4).translate(0, 1.5, 0), lambert(0x3a1a22), tx, tz, 7, Math.PI / 4);
+      colliders.boxes.push({ x: tx, z: tz, hw: 1.2, hd: 1.2 });
+      return null;
+    }
+    case 'mill': {
+      addRuin(scene, rand, colliders, o.x - 8, o.z - 6, 3, 2.5, 0x6a5a5a);
+      const tx = o.x + 8;
+      const tz = o.z + 8;
+      place(scene, new THREE.CylinderGeometry(1.6, 2.2, 7, 8).translate(0, 3.5, 0), lambert(0x6a5a5a), tx, tz);
+      place(scene, new THREE.ConeGeometry(2, 2.2, 8).translate(0, 1.1, 0), lambert(0x4a1a1e), tx, tz, 7);
+      const sails = new THREE.Group();
+      const sailMat = lambert(0x8a2a2e);
+      for (let i = 0; i < 4; i++) {
+        const sail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4.2, 0.08).translate(0, 2.1, 0), sailMat);
+        sail.rotation.z = (i / 4) * Math.PI * 2;
+        sail.castShadow = true;
+        sails.add(sail);
+      }
+      // Face the sails toward the outpost.
+      const toward = Math.atan2(o.x - tx, o.z - tz);
+      sails.position.set(tx + Math.sin(toward) * 1.8, heightAt(tx, tz) + 5.5, tz + Math.cos(toward) * 1.8);
+      sails.rotation.y = toward;
+      scene.add(sails);
+      colliders.circles.push({ x: tx, z: tz, r: 2.2 });
+      return (time) => (sails.rotation.z = time * 0.4);
+    }
+    case 'pens': {
+      // A fenced pen with gaps north and south.
+      const wood = lambert(0x3a2a24);
+      const hw = 7.5;
+      const hd = 6.5;
+      const rail = (x: number, z: number, halfX: number, halfZ: number) => {
+        place(scene, new THREE.BoxGeometry(halfX * 2, 1.2, halfZ * 2).translate(0, 0.6, 0), wood, x, z);
+        colliders.boxes.push({ x, z, hw: halfX, hd: halfZ });
+      };
+      rail(o.x - hw, o.z, 0.1, hd);
+      rail(o.x + hw, o.z, 0.1, hd);
+      for (const side of [-1, 1]) {
+        rail(o.x - hw / 2 - 1, o.z + side * hd, hw / 2 - 1, 0.1);
+        rail(o.x + hw / 2 + 1, o.z + side * hd, hw / 2 - 1, 0.1);
+      }
+      return null;
+    }
+    default:
+      return null;
   }
 }
+
+// ---------- Human camp ----------
 
 /** The human army's camp: tents, crates and a campfire. */
 function addCamp(scene: THREE.Scene, colliders: Colliders) {
   const canvas = lambert(0xd8cfb4);
   const tents: [number, number, number][] = [[-9, 4, 0.3], [9, 3, -0.4], [-9, -8, 0.9], [11, -7, -0.9]];
   for (const [x, z, rot] of tents) {
-    const tent = new THREE.Mesh(new THREE.ConeGeometry(2.1, 2.5, 4).translate(0, 1.25, 0), canvas);
-    tent.position.set(x, heightAt(x, z), z);
-    tent.rotation.y = Math.PI / 4 + rot;
-    tent.castShadow = true;
-    tent.receiveShadow = true;
-    scene.add(tent);
+    place(scene, new THREE.ConeGeometry(2.1, 2.5, 4).translate(0, 1.25, 0), canvas, x, z, 0, Math.PI / 4 + rot);
     colliders.circles.push({ x, z, r: 1.6 });
   }
   const crate = lambert(0x7a5a36);
   for (const [x, z] of [[-6, 6], [-5.2, 6.4], [6.5, -3], [7.2, -2.4]] as [number, number][]) {
-    const box = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), crate);
-    box.position.set(x, heightAt(x, z) + 0.4, z);
-    box.rotation.y = x * 0.7;
-    box.castShadow = true;
-    scene.add(box);
+    place(scene, new THREE.BoxGeometry(0.8, 0.8, 0.8), crate, x, z, 0.4, x * 0.7);
     colliders.circles.push({ x, z, r: 0.5 });
   }
 
@@ -455,8 +757,7 @@ function addCamp(scene: THREE.Scene, colliders: Colliders) {
     log.position.y = 0.12;
     fire.add(log);
   }
-  const flameMat = new THREE.MeshBasicMaterial({ color: 0xffa23a });
-  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 6).translate(0, 0.45, 0), flameMat);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 6).translate(0, 0.45, 0), new THREE.MeshBasicMaterial({ color: 0xffa23a }));
   const core = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.55, 5).translate(0, 0.28, 0), new THREE.MeshBasicMaterial({ color: 0xfff0a0 }));
   flame.position.y = core.position.y = 0.1;
   fire.add(flame, core);
@@ -466,101 +767,79 @@ function addCamp(scene: THREE.Scene, colliders: Colliders) {
   scene.add(fire);
   colliders.circles.push({ x: fx, z: fz, r: 0.9 });
 
-  return {
-    update(time: number) {
-      const flicker = 1 + Math.sin(time * 17) * 0.08 + Math.sin(time * 29 + 1) * 0.06;
-      flame.scale.set(1, flicker, 1);
-      flame.rotation.y = time * 2;
-      core.scale.set(1, 2 - flicker, 1);
-      light.intensity = 12 * flicker;
-    },
+  return (time: number) => {
+    const flicker = 1 + Math.sin(time * 17) * 0.08 + Math.sin(time * 29 + 1) * 0.06;
+    flame.scale.set(1, flicker, 1);
+    flame.rotation.y = time * 2;
+    core.scale.set(1, 2 - flicker, 1);
+    light.intensity = 12 * flicker;
   };
 }
 
-/**
- * The Zombie King's arena: a ring of stone walls and pillars with a gate on
- * the south side, and a crypt behind it. The gate slams shut when the fight
- * starts.
- */
-function addArena(scene: THREE.Scene, colliders: Colliders) {
-  const { x: ax, z: az, r } = KING_ARENA;
-  const stone = lambert(0x5d5850);
-  const dark = lambert(0x3f3b36);
-  const gateHalfAngle = 0.36;
-  const inGateGap = (a: number) => Math.abs(Math.atan2(Math.sin(a - Math.PI), Math.cos(a - Math.PI))) < gateHalfAngle;
+// ---------- Leader arenas ----------
 
-  // Low wall: dense circle colliders around the ring (except the gate).
+interface ArenaStyle {
+  pillar: THREE.BufferGeometry;
+  pillarColor: number;
+  wallColor: number;
+  wallHeight: number;
+  barColor: number;
+}
+
+const ARENA_STYLES: Record<TerritoryId, ArenaStyle> = {
+  zombie: { pillar: new THREE.BoxGeometry(1, 3.4, 1), pillarColor: 0x3f3b36, wallColor: 0x5d5850, wallHeight: 1.7, barColor: 0xd9cfb0 },
+  // Standing stones linked by bramble hedges.
+  witch: { pillar: new THREE.BoxGeometry(1.2, 4.4, 0.8), pillarColor: 0x56605a, wallColor: 0x24301f, wallHeight: 1.8, barColor: 0x3a2a4a },
+  // A castle courtyard: tall walls and square towers.
+  vampire: { pillar: new THREE.BoxGeometry(1.6, 5.2, 1.6), pillarColor: 0x3e3a48, wallColor: 0x4e4a58, wallHeight: 3.4, barColor: 0x1e1a22 },
+};
+
+/**
+ * A leader's walled arena with a gate facing the human camp, and a
+ * landmark behind it (crypt, hex tree or castle keep). The gate slams shut
+ * when the fight starts.
+ */
+function addArena(scene: THREE.Scene, rand: () => number, colliders: Colliders, t: TerritoryDef): Gate {
+  const { x: ax, z: az, r, gateAngle } = t.arena;
+  const style = ARENA_STYLES[t.id];
+  const pillarMat = lambert(style.pillarColor);
+  const wallMat = lambert(style.wallColor);
+  const gateHalfAngle = 0.36;
+  const inGateGap = (a: number) => Math.abs(Math.atan2(Math.sin(a - gateAngle), Math.cos(a - gateAngle))) < gateHalfAngle;
+
+  // The wall: dense circle colliders around the ring, except the gate.
   for (let i = 0; i < 96; i++) {
     const a = (i / 96) * Math.PI * 2;
-    if (inGateGap(a)) continue;
-    colliders.circles.push({ x: ax + Math.sin(a) * r, z: az + Math.cos(a) * r, r: 0.55 });
+    if (!inGateGap(a)) colliders.circles.push({ x: ax + dirX(a) * r, z: az + dirZ(a) * r, r: 0.55 });
   }
   const pillars = 24;
   for (let i = 0; i < pillars; i++) {
     const a = (i / pillars) * Math.PI * 2;
     const a2 = ((i + 1) / pillars) * Math.PI * 2;
     if (inGateGap(a)) continue;
-    const px = ax + Math.sin(a) * r;
-    const pz = az + Math.cos(a) * r;
-    const pillar = new THREE.Mesh(new THREE.BoxGeometry(1, 3.4, 1), dark);
-    pillar.position.set(px, heightAt(px, pz) + 1.7, pz);
-    pillar.rotation.y = a;
-    pillar.castShadow = true;
-    scene.add(pillar);
+    const px = ax + dirX(a) * r;
+    const pz = az + dirZ(a) * r;
+    const h = (style.pillar as THREE.BoxGeometry).parameters.height;
+    const pillar = place(scene, style.pillar, pillarMat, px, pz, h / 2, a);
+    if (t.id === 'witch') pillar.rotation.z = (rand() - 0.5) * 0.15;
     if (inGateGap(a2)) continue;
-    // Wall section between this pillar and the next.
-    const mx = ax + Math.sin((a + a2) / 2) * r;
-    const mz = az + Math.cos((a + a2) / 2) * r;
+    const mx = ax + dirX((a + a2) / 2) * r;
+    const mz = az + dirZ((a + a2) / 2) * r;
     const len = 2 * r * Math.sin(Math.PI / pillars);
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(len, 1.7, 0.6), stone);
-    wall.position.set(mx, heightAt(mx, mz) + 0.85, mz);
-    wall.rotation.y = (a + a2) / 2;
-    wall.castShadow = true;
-    wall.receiveShadow = true;
-    scene.add(wall);
+    place(scene, new THREE.BoxGeometry(len, style.wallHeight, 0.6), wallMat, mx, mz, style.wallHeight / 2, (a + a2) / 2);
   }
 
-  // The crypt behind the throne.
-  const cx = ax;
-  const cz = az + r + 4.5;
-  const crypt = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(9, 5, 6), dark);
-  body.position.y = 2.5;
-  const roof = new THREE.Mesh(new THREE.ConeGeometry(6.4, 3, 4), stone);
-  roof.position.y = 6.5;
-  roof.rotation.y = Math.PI / 4;
-  roof.scale.z = 0.7;
-  const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.4, 0.2), new THREE.MeshBasicMaterial({ color: 0x0c0a08 }));
-  door.position.set(0, 1.7, -3.05);
-  crypt.add(body, roof, door);
-  crypt.position.set(cx, heightAt(cx, cz), cz);
-  crypt.traverse((o) => (o.castShadow = true));
-  scene.add(crypt);
-  colliders.boxes.push({ x: cx, z: cz, hw: 4.5, hd: 3 });
+  addArenaLandmark(scene, colliders, t);
 
-  // Throne
-  const tx = KING_THRONE.x;
-  const tz = KING_THRONE.z + 2.5;
-  const throne = new THREE.Group();
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 1.6), stone);
-  seat.position.y = 0.6;
-  const back = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.6, 0.5), stone);
-  back.position.set(0, 1.8, 0.6);
-  throne.add(seat, back);
-  throne.position.set(tx, heightAt(tx, tz), tz);
-  throne.traverse((o) => (o.castShadow = true));
-  scene.add(throne);
-  colliders.circles.push({ x: tx, z: tz, r: 1.2 });
-
-  // Gate of bone-white bars, hidden in the ground until the fight starts.
+  // Gate bars, hidden until the fight starts.
   const gate = new THREE.Group();
-  const barMat = lambert(0xd9cfb0);
+  const barMat = lambert(style.barColor);
   const gateColliders: Circle[] = [];
   const bars = 12;
   for (let i = 0; i <= bars; i++) {
-    const a = Math.PI - gateHalfAngle + (i / bars) * gateHalfAngle * 2;
-    const bx = ax + Math.sin(a) * r;
-    const bz = az + Math.cos(a) * r;
+    const a = gateAngle - gateHalfAngle + (i / bars) * gateHalfAngle * 2;
+    const bx = ax + dirX(a) * r;
+    const bz = az + dirZ(a) * r;
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.22, 3, 0.22), barMat);
     bar.position.set(bx, heightAt(bx, bz) + 1.5, bz);
     bar.castShadow = true;
@@ -584,7 +863,93 @@ function addArena(scene: THREE.Scene, colliders: Colliders) {
   };
 }
 
-/** Where the hero stands after respawning at a banner: just south of it. */
+/** The structure behind each arena, opposite the gate. */
+function addArenaLandmark(scene: THREE.Scene, colliders: Colliders, t: TerritoryDef) {
+  const { x: ax, z: az, r, gateAngle } = t.arena;
+  const back = gateAngle + Math.PI;
+  const bx = ax + dirX(back) * (r + 4.5);
+  const bz = az + dirZ(back) * (r + 4.5);
+  // Its front faces the arena center.
+  const facing = gateAngle - Math.PI;
+  const sideways = Math.abs(Math.sin(facing)) > 0.5;
+  const box = (hw: number, hd: number) => colliders.boxes.push({ x: bx, z: bz, hw: sideways ? hd : hw, hd: sideways ? hw : hd });
+  const group = new THREE.Group();
+  group.position.set(bx, heightAt(bx, bz), bz);
+  group.rotation.y = facing;
+
+  if (t.id === 'zombie') {
+    // The crypt, and the king's throne in front of it.
+    const dark = lambert(0x3f3b36);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(9, 5, 6), dark);
+    body.position.y = 2.5;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(6.4, 3, 4), lambert(0x5d5850));
+    roof.position.y = 6.5;
+    roof.rotation.y = Math.PI / 4;
+    roof.scale.z = 0.7;
+    const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.4, 0.2), new THREE.MeshBasicMaterial({ color: 0x0c0a08 }));
+    door.position.set(0, 1.7, -3.05);
+    group.add(body, roof, door);
+    box(4.5, 3);
+    const tx = t.throne.x + dirX(back) * 2.5;
+    const tz = t.throne.z + dirZ(back) * 2.5;
+    const throne = new THREE.Group();
+    const stone = lambert(0x5d5850);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 1.6), stone);
+    seat.position.y = 0.6;
+    const backrest = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.6, 0.5), stone);
+    backrest.position.set(0, 1.8, 0.6);
+    throne.add(seat, backrest);
+    throne.position.set(tx, heightAt(tx, tz), tz);
+    throne.rotation.y = facing;
+    throne.traverse((o) => (o.castShadow = true));
+    scene.add(throne);
+    colliders.circles.push({ x: tx, z: tz, r: 1.2 });
+  } else if (t.id === 'witch') {
+    // A vast hex tree with a glowing hollow.
+    const bark = lambert(0x2a221e);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.4, 9, 7), bark);
+    trunk.position.y = 4.5;
+    group.add(trunk);
+    for (let i = 0; i < 6; i++) {
+      const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.5, 5, 5).translate(0, 2.5, 0), bark);
+      branch.position.y = 7 + (i % 2);
+      branch.rotation.set(0.9, (i / 6) * Math.PI * 2, 0, 'YXZ');
+      group.add(branch);
+    }
+    const hollow = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2, 0.3), new THREE.MeshBasicMaterial({ color: 0xb070ff }));
+    hollow.position.set(0, 2, -1.75);
+    group.add(hollow);
+    colliders.circles.push({ x: bx, z: bz, r: 2.4 });
+  } else {
+    // Castle Nightspire's keep: a tall hall flanked by towers.
+    const stone = lambert(0x3e3a48);
+    const roofMat = lambert(0x5a0f1e);
+    const keep = new THREE.Mesh(new THREE.BoxGeometry(12, 9, 6), stone);
+    keep.position.y = 4.5;
+    const keepRoof = new THREE.Mesh(new THREE.ConeGeometry(7.5, 4, 4), roofMat);
+    keepRoof.position.y = 11;
+    keepRoof.rotation.y = Math.PI / 4;
+    keepRoof.scale.z = 0.55;
+    group.add(keep, keepRoof);
+    for (const side of [-1, 1]) {
+      const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 2, 13, 8), stone);
+      tower.position.set(side * 7, 6.5, 0);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(2.3, 4, 8), roofMat);
+      cap.position.set(side * 7, 15, 0);
+      group.add(tower, cap);
+    }
+    const door = new THREE.Mesh(new THREE.BoxGeometry(3, 4.5, 0.2), new THREE.MeshBasicMaterial({ color: 0x0a0608 }));
+    door.position.set(0, 2.25, -3.05);
+    const glowWindow = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2, 0.2), new THREE.MeshBasicMaterial({ color: 0xff4a3a }));
+    glowWindow.position.set(0, 6.5, -3.05);
+    group.add(door, glowWindow);
+    box(9, 3);
+  }
+  group.traverse((o) => (o.castShadow = true));
+  scene.add(group);
+}
+
+/** Where the hero stands after respawning at a banner: just beside it. */
 export function respawnPoint(banner: { x: number; z: number }) {
   return { x: banner.x - 1.5, z: banner.z - 2.5 };
 }
