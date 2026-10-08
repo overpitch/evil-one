@@ -1,0 +1,200 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #f2ead8;
+  font-family: Georgia, 'Times New Roman', serif;
+  user-select: none;
+}
+
+#app canvas {
+  display: block;
+}
+
+/* ---------- HUD ---------- */
+
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.status {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  width: 280px;
+}
+
+.hero-name {
+  font-size: 18px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  text-shadow: 0 2px 4px #000;
+}
+
+.bar {
+  position: relative;
+  height: 16px;
+  margin-bottom: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.bar.stamina {
+  height: 10px;
+}
+
+.bar .fill {
+  height: 100%;
+  width: 100%;
+  transition: width 0.12s linear;
+}
+
+.bar.health .fill {
+  background: linear-gradient(#e2504a, #a3201c);
+}
+
+.bar.stamina .fill {
+  background: linear-gradient(#e8d26a, #b39420);
+}
+
+.bar.stamina.low {
+  border-color: rgba(255, 90, 60, 0.8);
+}
+
+.bar span {
+  position: absolute;
+  inset: 0;
+  font-size: 11px;
+  line-height: 12px;
+  text-align: center;
+  text-shadow: 0 1px 2px #000;
+}
+
+.kills {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  font-size: 16px;
+  letter-spacing: 1px;
+  text-shadow: 0 2px 4px #000;
+}
+
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.vignette {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(170, 0, 0, 0.75) 100%);
+}
+
+/* ---------- Overlays ---------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 6, 10, 0.72);
+  cursor: pointer;
+}
+
+.overlay.hidden {
+  display: none;
+}
+
+.panel {
+  text-align: center;
+  padding: 32px 40px;
+  max-width: 520px;
+  cursor: default;
+}
+
+h1 {
+  margin: 0;
+  font-size: 64px;
+  letter-spacing: 10px;
+  color: #c9242a;
+  text-shadow: 0 0 24px rgba(201, 36, 42, 0.5), 0 4px 0 #3a0608;
+}
+
+h1.fallen {
+  font-size: 44px;
+  letter-spacing: 4px;
+  margin-bottom: 28px;
+}
+
+.subtitle {
+  margin: 6px 0 28px;
+  color: #b8ad96;
+  letter-spacing: 2px;
+}
+
+button {
+  font: inherit;
+  font-size: 20px;
+  letter-spacing: 2px;
+  padding: 12px 32px;
+  color: #f2ead8;
+  background: #7d1418;
+  border: 2px solid #c9242a;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #9c1b20;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 28px 0 20px;
+  text-align: left;
+  font-size: 15px;
+}
+
+.controls dt {
+  color: #e8d26a;
+  text-align: right;
+}
+
+.controls dd {
+  margin: 0;
+  color: #d8cfbc;
+}
+
+.sens {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #b8ad96;
+}
+
+.sens output {
+  width: 2.5em;
+  text-align: left;
+}

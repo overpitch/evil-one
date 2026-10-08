@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Evil One</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud">
+      <div class="status">
+        <div class="hero-name" id="hero-name">Soldier</div>
+        <div class="bar health"><div class="fill" id="hp-fill"></div><span id="hp-text"></span></div>
+        <div class="bar stamina" id="st-bar"><div class="fill" id="st-fill"></div></div>
+      </div>
+      <div class="kills" id="kills">Zombies slain: 0</div>
+      <div class="crosshair"></div>
+      <div class="vignette" id="vignette"></div>
+    </div>
+
+    <div id="overlay" class="overlay">
+      <div class="panel">
+        <h1>EVIL ONE</h1>
+        <p class="subtitle">Milestone 1 · Combat prototype</p>
+        <button id="play-btn">Click to play</button>
+        <dl class="controls">
+          <dt>W A S D</dt><dd>Move</dd>
+          <dt>Mouse / trackpad</dt><dd>Look</dd>
+          <dt>Click or J</dt><dd>Attack (keep pressing for a 3-hit combo)</dd>
+          <dt>Q or K (hold)</dt><dd>Block</dd>
+          <dt>Space</dt><dd>Dodge roll</dd>
+          <dt>Shift</dt><dd>Sprint</dd>
+          <dt>Esc</dt><dd>Pause</dd>
+        </dl>
+        <label class="sens">Look sensitivity
+          <input type="range" id="sens" min="0.2" max="3" step="0.1" value="1" />
+          <output id="sens-value">1.0</output>
+        </label>
+      </div>
+    </div>
+
+    <div id="death" class="overlay hidden">
+      <div class="panel">
+        <h1 class="fallen">You have fallen</h1>
+        <button id="respawn-btn">Rise again</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
