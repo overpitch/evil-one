@@ -24,5 +24,11 @@ export function statsForLevel(level: number) {
 
 /** XP awarded per kill, by enemy type. */
 export const XP_REWARD = {
-  zombie: 25,
+  shambler: 25,
+  runner: 30,
+  brute: 70,
+  zombieKing: 400,
 };
+
+/** Bonus XP for capturing an outpost. */
+export const OUTPOST_XP = 50;

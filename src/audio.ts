@@ -77,42 +77,42 @@ function groanVoice(vol: number, base: number, end: number, dur: number) {
 }
 
 export const sfx = {
-  swing(heavy = false) {
+  swing(heavy = false, vol = 1) {
     const a = ready();
-    if (!a) return;
+    if (!a || vol < 0.03) return;
     const t = a.currentTime;
     const dur = heavy ? 0.3 : 0.18;
     const f = filter(a, 'bandpass', 700, 1.4);
     f.frequency.setValueAtTime(heavy ? 400 : 700, t);
     f.frequency.exponentialRampToValueAtTime(heavy ? 1800 : 3200, t + dur * 0.6);
     f.frequency.exponentialRampToValueAtTime(heavy ? 500 : 900, t + dur);
-    noiseSource(a, t, dur).connect(f).connect(envelope(a, t, heavy ? 0.5 : 0.35, dur * 0.35, dur * 0.65));
+    noiseSource(a, t, dur).connect(f).connect(envelope(a, t, (heavy ? 0.5 : 0.35) * vol, dur * 0.35, dur * 0.65));
   },
 
-  hit(heavy = false) {
+  hit(heavy = false, vol = 1) {
     const a = ready();
-    if (!a) return;
+    if (!a || vol < 0.03) return;
     const t = a.currentTime;
-    tone(a, 'sine', heavy ? 140 : 170, 45, t, 0.16).connect(envelope(a, t, heavy ? 1 : 0.8, 0.005, 0.2));
-    noiseSource(a, t, 0.12).connect(filter(a, 'lowpass', 1500)).connect(envelope(a, t, 0.55, 0.003, 0.1));
+    tone(a, 'sine', heavy ? 140 : 170, 45, t, 0.16).connect(envelope(a, t, (heavy ? 1 : 0.8) * vol, 0.005, 0.2));
+    noiseSource(a, t, 0.12).connect(filter(a, 'lowpass', 1500)).connect(envelope(a, t, 0.55 * vol, 0.003, 0.1));
   },
 
-  block() {
+  block(vol = 1) {
     const a = ready();
-    if (!a) return;
+    if (!a || vol < 0.03) return;
     const t = a.currentTime;
     [880, 1318, 2093, 2794].forEach((f, i) => {
-      tone(a, 'triangle', f, f * 0.99, t, 0.5).connect(envelope(a, t, 0.2 / (i + 1), 0.002, 0.5 - i * 0.08));
+      tone(a, 'triangle', f, f * 0.99, t, 0.5).connect(envelope(a, t, (0.2 / (i + 1)) * vol, 0.002, 0.5 - i * 0.08));
     });
-    noiseSource(a, t, 0.06).connect(filter(a, 'highpass', 3000)).connect(envelope(a, t, 0.3, 0.002, 0.05));
+    noiseSource(a, t, 0.06).connect(filter(a, 'highpass', 3000)).connect(envelope(a, t, 0.3 * vol, 0.002, 0.05));
   },
 
-  hurt() {
+  hurt(vol = 1) {
     const a = ready();
-    if (!a) return;
+    if (!a || vol < 0.03) return;
     const t = a.currentTime;
-    tone(a, 'sawtooth', 260, 110, t, 0.25).connect(filter(a, 'lowpass', 900)).connect(envelope(a, t, 0.35, 0.01, 0.25));
-    tone(a, 'sine', 120, 50, t, 0.15).connect(envelope(a, t, 0.6, 0.005, 0.15));
+    tone(a, 'sawtooth', 260, 110, t, 0.25).connect(filter(a, 'lowpass', 900)).connect(envelope(a, t, 0.35 * vol, 0.01, 0.25));
+    tone(a, 'sine', 120, 50, t, 0.15).connect(envelope(a, t, 0.6 * vol, 0.005, 0.15));
   },
 
   roll() {
@@ -136,6 +136,20 @@ export const sfx = {
       tone(a, 'triangle', f, f, start, 0.6).connect(envelope(a, start, 0.28, 0.01, i === 3 ? 0.9 : 0.4));
       tone(a, 'sine', f * 2, f * 2, start, 0.4).connect(envelope(a, start, 0.06, 0.01, 0.35));
     });
+  },
+
+  checkpoint() {
+    const a = ready();
+    if (!a) return;
+    const t = a.currentTime;
+    [392, 523.25, 659.25].forEach((f) => {
+      tone(a, 'triangle', f, f, t, 1.2).connect(envelope(a, t, 0.16, 0.02, 1.1));
+    });
+  },
+
+  roar() {
+    groanVoice(1, 55, 38, 1.8);
+    groanVoice(0.7, 82, 50, 1.6);
   },
 
   /** vol is 0..1, usually from distance to the listener. */

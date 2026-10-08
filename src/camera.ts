@@ -13,6 +13,8 @@ export class ThirdPersonCamera {
   yaw = 0;
   pitch = 0.12;
   sensitivity = 1;
+  /** Mouse up looks down. */
+  invertY = false;
   distance = 3.6;
   height = 1.7;
   shoulder = 0.85;
@@ -35,7 +37,7 @@ export class ThirdPersonCamera {
   applyInput(input: Input) {
     const s = BASE_SENSITIVITY * this.sensitivity;
     this.yaw -= input.mouseDX * s;
-    this.pitch = clamp(this.pitch + input.mouseDY * s, -0.55, 0.9);
+    this.pitch = clamp(this.pitch + input.mouseDY * s * (this.invertY ? -1 : 1), -0.55, 0.9);
   }
 
   /** Snaps instead of easing on the next update (respawn, teleport). */

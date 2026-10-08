@@ -20,22 +20,45 @@
         <div class="bar xp"><div class="fill" id="xp-fill"></div></div>
         <div class="xp-text" id="xp-text"></div>
       </div>
-      <div class="kills" id="kills">Zombies slain: 0</div>
+      <div class="top-center">
+        <div class="objective" id="objective"></div>
+        <div class="boss hidden" id="boss">
+          <div class="boss-name" id="boss-name"></div>
+          <div class="bar boss-bar"><div class="fill" id="boss-fill"></div></div>
+        </div>
+      </div>
+      <div class="top-right">
+        <div class="kills" id="kills"></div>
+        <div class="hint">M · Map</div>
+      </div>
       <div class="crosshair"></div>
       <div id="floaters"></div>
-      <div class="level-up" id="level-up">
-        <div class="level-up-title">Level Up</div>
-        <div class="level-up-detail" id="level-up-detail"></div>
+      <div class="marker hidden" id="marker"><span class="marker-icon">◆</span><span id="marker-dist"></span></div>
+      <div class="announce" id="announce">
+        <div class="announce-title" id="announce-title"></div>
+        <div class="announce-detail" id="announce-detail"></div>
       </div>
+      <div class="subtitle-line" id="subtitle-line"><span class="speaker" id="speaker"></span><span id="line"></span></div>
       <div class="vignette" id="vignette"></div>
     </div>
 
     <!-- Title -->
-    <div id="title-screen" class="overlay screen">
+    <div id="title-screen" class="overlay screen hidden">
       <div class="panel">
         <h1>EVIL ONE</h1>
         <p class="subtitle">Rise against Zomawi</p>
-        <button id="new-game-btn">New Game</button>
+        <div class="menu" id="title-menu">
+          <button id="continue-btn" class="hidden">Continue<span class="button-sub" id="continue-sub"></span></button>
+          <button id="new-game-btn">New Game</button>
+          <button id="title-options-btn" class="secondary">Options</button>
+        </div>
+        <div class="confirm hidden" id="confirm">
+          <p id="confirm-text"></p>
+          <div class="menu row">
+            <button id="confirm-yes-btn">Start over</button>
+            <button id="confirm-no-btn" class="secondary">Cancel</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -62,16 +85,44 @@
       </div>
     </div>
 
+    <!-- Options (from the title or pause screen) -->
+    <div id="options-screen" class="overlay screen hidden">
+      <div class="panel">
+        <h2>Options</h2>
+        <p class="subtitle">Saved for whoever plays in this browser</p>
+        <div class="options">
+          <label class="option">
+            <span>Look sensitivity</span>
+            <input type="range" id="sens" min="0.2" max="3" step="0.1" value="1" />
+            <output id="sens-value">1.0</output>
+          </label>
+          <label class="option">
+            <span>Invert vertical look</span>
+            <input type="checkbox" id="invert-y" class="toggle" />
+            <output id="invert-value">Off</output>
+          </label>
+        </div>
+        <button id="options-back-btn">Back</button>
+      </div>
+    </div>
+
     <!-- Pause -->
     <div id="pause-screen" class="overlay hidden">
       <div class="panel">
         <h2>Paused</h2>
-        <button id="resume-btn">Resume</button>
+        <div class="menu row">
+          <button id="resume-btn">Resume</button>
+          <button id="pause-options-btn" class="secondary">Options</button>
+        </div>
         <dl class="controls" data-controls></dl>
-        <label class="sens">Look sensitivity
-          <input type="range" id="sens" min="0.2" max="3" step="0.1" value="1" />
-          <output id="sens-value">1.0</output>
-        </label>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div id="map-screen" class="overlay map hidden">
+      <div class="map-panel">
+        <canvas id="map-canvas" width="900" height="900"></canvas>
+        <div class="map-hint">M · Close map</div>
       </div>
     </div>
 
@@ -79,6 +130,7 @@
     <div id="death-screen" class="overlay hidden">
       <div class="panel">
         <h1 class="fallen">You have fallen</h1>
+        <p class="subtitle" id="death-sub">You will return to your last checkpoint.</p>
         <button id="respawn-btn">Rise again</button>
       </div>
     </div>

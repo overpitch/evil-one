@@ -1,11 +1,16 @@
+import * as THREE from 'three';
 import type { Player } from './player';
 import { PER_LEVEL } from './progression';
+import type { Settings } from './settings';
+import type { SaveData } from './save';
+import { drawMap, type MapData } from './map';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-const SENSITIVITY_KEY = 'evil-one.sensitivity';
 const LAST_NAME_KEY = 'evil-one.last-name';
 const MAX_NAME_LENGTH = 20;
+const ANNOUNCE_TIME = 2700;
+const SUBTITLE_TIME = 4500;
 
 const CONTROLS: [string, string][] = [
   ['W A S D', 'Move'],
@@ -14,6 +19,7 @@ const CONTROLS: [string, string][] = [
   ['Q or K (hold)', 'Block'],
   ['Space', 'Dodge roll'],
   ['Shift', 'Sprint'],
+  ['M', 'Map'],
   ['Esc', 'Pause'],
 ];
 
@@ -22,7 +28,7 @@ const RANDOM_NAMES = [
   'Thorne', 'Wren', 'Osric', 'Maren', 'Bram', 'Sable', 'Tamsin',
 ];
 
-type Screen = 'title' | 'name' | 'intro' | 'none';
+type Screen = 'title' | 'name' | 'intro' | 'options' | 'none';
 
 function storageGet(key: string) {
   try {
@@ -49,15 +55,15 @@ export function cleanName(raw: string): { name: string } | { error: string } {
   return { name };
 }
 
-/** DOM overlay: status bars, floating text layer, and every menu screen. */
+/** DOM overlay: status bars, messages, objective marker, map, and every menu screen. */
 export class Hud {
+  onContinue?: () => void;
   onNewGame?: () => void;
   onNameChosen?: (name: string) => void;
   onBegin?: () => void;
   onResume?: () => void;
   onRespawn?: () => void;
-  onSensitivity?: (value: number) => void;
-  sensitivity = 1;
+  onSettings?: (settings: Settings) => void;
 
   readonly floaterLayer = $('floaters');
 
@@ -72,19 +78,38 @@ export class Hud {
   private readonly xpText = $('xp-text');
   private readonly kills = $('kills');
   private readonly vignette = $('vignette');
-  private readonly levelUp = $('level-up');
-  private readonly levelUpDetail = $('level-up-detail');
+  private readonly objective = $('objective');
+  private readonly boss = $('boss');
+  private readonly bossName = $('boss-name');
+  private readonly bossFill = $('boss-fill');
+  private readonly marker = $('marker');
+  private readonly markerDist = $('marker-dist');
+  private readonly announceEl = $('announce');
+  private readonly subtitle = $('subtitle-line');
   private readonly screens: Record<Exclude<Screen, 'none'>, HTMLElement> = {
     title: $('title-screen'),
     name: $('name-screen'),
     intro: $('intro-screen'),
+    options: $('options-screen'),
   };
   private readonly pause = $('pause-screen');
   private readonly death = $('death-screen');
+  private readonly mapScreen = $('map-screen');
+  private readonly mapCanvas = $<HTMLCanvasElement>('map-canvas');
   private readonly nameInput = $<HTMLInputElement>('name-input');
   private readonly nameError = $('name-error');
 
-  constructor() {
+  private settings: Settings;
+  /** Where the Options screen's Back button returns to. */
+  private optionsReturn: 'title' | 'pause' = 'title';
+  private announceQueue: { title: string; detail: string; gold: boolean }[] = [];
+  private announcing = false;
+  private subtitleTimer = 0;
+  private hasSave = false;
+  private readonly projected = new THREE.Vector3();
+
+  constructor(settings: Settings) {
+    this.settings = { ...settings };
     for (const dl of document.querySelectorAll('[data-controls]')) {
       for (const [keys, action] of CONTROLS) {
         const dt = document.createElement('dt');
@@ -95,7 +120,20 @@ export class Hud {
       }
     }
 
-    $('new-game-btn').addEventListener('click', () => this.onNewGame?.());
+    // Title
+    $('continue-btn').addEventListener('click', () => this.onContinue?.());
+    $('new-game-btn').addEventListener('click', () => {
+      if (this.hasSave) this.showConfirm(true);
+      else this.onNewGame?.();
+    });
+    $('confirm-yes-btn').addEventListener('click', () => {
+      this.showConfirm(false);
+      this.onNewGame?.();
+    });
+    $('confirm-no-btn').addEventListener('click', () => this.showConfirm(false));
+    $('title-options-btn').addEventListener('click', () => this.openOptions('title'));
+
+    // Naming
     $('random-name-btn').addEventListener('click', () => {
       const options = RANDOM_NAMES.filter((n) => n !== this.nameInput.value);
       this.nameInput.value = options[Math.floor(Math.random() * options.length)];
@@ -115,32 +153,52 @@ export class Hud {
       this.onNameChosen?.(result.name);
     });
     $('begin-btn').addEventListener('click', () => this.onBegin?.());
+
+    // Pause, death
     $('resume-btn').addEventListener('click', () => this.onResume?.());
+    $('pause-options-btn').addEventListener('click', () => this.openOptions('pause'));
     this.pause.addEventListener('click', (e) => {
       if (e.target === this.pause) this.onResume?.();
     });
     $('respawn-btn').addEventListener('click', () => this.onRespawn?.());
 
-    const slider = $<HTMLInputElement>('sens');
-    const output = $<HTMLOutputElement>('sens-value');
-    const saved = Number(storageGet(SENSITIVITY_KEY));
-    if (saved > 0) slider.value = String(saved);
-    const apply = () => {
-      this.sensitivity = Number(slider.value);
-      output.value = this.sensitivity.toFixed(1);
-      this.onSensitivity?.(this.sensitivity);
+    // Options
+    const sens = $<HTMLInputElement>('sens');
+    const sensValue = $<HTMLOutputElement>('sens-value');
+    const invert = $<HTMLInputElement>('invert-y');
+    const invertValue = $<HTMLOutputElement>('invert-value');
+    const render = () => {
+      sens.value = String(this.settings.sensitivity);
+      sensValue.value = this.settings.sensitivity.toFixed(1);
+      invert.checked = this.settings.invertY;
+      invertValue.value = this.settings.invertY ? 'On' : 'Off';
     };
-    slider.addEventListener('input', () => {
-      apply();
-      storageSet(SENSITIVITY_KEY, slider.value);
+    sens.addEventListener('input', () => {
+      this.settings.sensitivity = Number(sens.value);
+      render();
+      this.onSettings?.({ ...this.settings });
     });
-    apply();
+    invert.addEventListener('change', () => {
+      this.settings.invertY = invert.checked;
+      render();
+      this.onSettings?.({ ...this.settings });
+    });
+    render();
+    $('options-back-btn').addEventListener('click', () => {
+      if (this.optionsReturn === 'pause') {
+        this.showScreen('none');
+        this.showPause(true);
+      } else {
+        this.showScreen('title');
+      }
+    });
   }
 
   /** Shows one menu screen (or none) and hides the rest. */
   showScreen(screen: Screen) {
     for (const [name, el] of Object.entries(this.screens)) el.classList.toggle('hidden', name !== screen);
-    this.hud.classList.toggle('hidden', screen !== 'none');
+    const inMenus = screen === 'title' || screen === 'name' || screen === 'intro' || (screen === 'options' && this.optionsReturn === 'title');
+    this.hud.classList.toggle('hidden', inMenus);
     if (screen === 'name') {
       this.nameInput.value = storageGet(LAST_NAME_KEY) ?? '';
       this.nameError.textContent = '';
@@ -150,6 +208,33 @@ export class Hud {
         this.nameInput.select();
       });
     }
+  }
+
+  /** The title screen, with a Continue button when there's a saved hero. */
+  showTitle(save: SaveData | null) {
+    this.hasSave = save !== null;
+    $('continue-btn').classList.toggle('hidden', !save);
+    if (save) $('continue-sub').textContent = `${save.name} · Level ${save.level}`;
+    $('confirm-text').textContent = save
+      ? `Start a new game? Your saved hero, ${save.name} (Level ${save.level}), will be erased.`
+      : '';
+    this.showConfirm(false);
+    this.showScreen('title');
+  }
+
+  private showConfirm(show: boolean) {
+    $('confirm').classList.toggle('hidden', !show);
+    $('title-menu').classList.toggle('hidden', show);
+  }
+
+  private openOptions(from: 'title' | 'pause') {
+    this.optionsReturn = from;
+    this.showPause(false);
+    this.showScreen('options');
+  }
+
+  get optionsOpen() {
+    return !this.screens.options.classList.contains('hidden');
   }
 
   /** Writes the intro story with the hero's name, lines fading in one by one. */
@@ -163,7 +248,7 @@ export class Hud {
       ['Then came ', villain(), ': born human, raised from the grave as a zombie, crowned by witches. Part of all three, and master of them all.'],
       ['Now three armies march under its banner: the zombie horde, the witch covens, and the vampire lords.'],
       ['The human army rides out to meet them. Among its soldiers stands ', hero(), '.'],
-      ['The first zombies are already at the training grounds. Draw your sword.'],
+      ['To the north lie the Zombie Lands. Take back their outposts, then face the Zombie King.'],
     ];
     lines.forEach((parts, i) => {
       const p = document.createElement('p');
@@ -192,13 +277,106 @@ export class Hud {
     this.death.classList.toggle('hidden', !show);
   }
 
-  showLevelUp(level: number) {
-    this.levelUpDetail.textContent =
-      `Level ${level} · Health +${PER_LEVEL.hp} · Stamina +${PER_LEVEL.stamina} · Damage +${Math.round(PER_LEVEL.damage * 100)}%`;
-    this.levelUp.classList.remove('show');
-    void this.levelUp.offsetWidth; // restart the animation
-    this.levelUp.classList.add('show');
+  // ---------- Messages ----------
+
+  /** Big centered message. Messages queue so they never overlap. */
+  announce(title: string, detail: string, gold = false) {
+    this.announceQueue.push({ title, detail, gold });
+    if (!this.announcing) this.nextAnnouncement();
   }
+
+  private nextAnnouncement() {
+    const next = this.announceQueue.shift();
+    if (!next) {
+      this.announcing = false;
+      return;
+    }
+    this.announcing = true;
+    $('announce-title').textContent = next.title;
+    $('announce-detail').textContent = next.detail;
+    this.announceEl.classList.toggle('gold', next.gold);
+    this.announceEl.classList.remove('show');
+    void this.announceEl.offsetWidth; // restart the animation
+    this.announceEl.classList.add('show');
+    setTimeout(() => this.nextAnnouncement(), ANNOUNCE_TIME);
+  }
+
+  showLevelUp(level: number) {
+    this.announce(
+      'Level Up',
+      `Level ${level} · Health +${PER_LEVEL.hp} · Stamina +${PER_LEVEL.stamina} · Damage +${Math.round(PER_LEVEL.damage * 100)}%`,
+      true,
+    );
+  }
+
+  /** A line of dialogue at the bottom of the screen. */
+  say(speaker: string, line: string) {
+    $('speaker').textContent = speaker;
+    $('line').textContent = line;
+    this.subtitle.classList.add('show');
+    clearTimeout(this.subtitleTimer);
+    this.subtitleTimer = window.setTimeout(() => this.subtitle.classList.remove('show'), SUBTITLE_TIME);
+  }
+
+  showBoss(name: string | null) {
+    this.boss.classList.toggle('hidden', name === null);
+    if (name) this.bossName.textContent = name;
+  }
+
+  setBossHealth(fraction: number) {
+    this.bossFill.style.width = `${Math.max(0, fraction) * 100}%`;
+  }
+
+  // ---------- Objective ----------
+
+  /** Objective text at the top, and a marker over the target (pinned to the screen edge when off-screen). */
+  setObjective(text: string, at: THREE.Vector3 | null, camera: THREE.Camera, from: THREE.Vector3) {
+    if (this.objective.textContent !== text) this.objective.textContent = text;
+    if (!at) {
+      this.marker.classList.add('hidden');
+      return;
+    }
+    const dist = Math.hypot(at.x - from.x, at.z - from.z);
+    if (dist < 8) {
+      this.marker.classList.add('hidden');
+      return;
+    }
+    this.marker.classList.remove('hidden');
+    this.markerDist.textContent = `${Math.round(dist)} m`;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const p = this.projected.set(at.x, at.y + 4, at.z).project(camera);
+    const behind = p.z > 1;
+    let dx = p.x * (behind ? -1 : 1) * (w / 2);
+    let dy = -p.y * (behind ? -1 : 1) * (h / 2);
+    const margin = 48;
+    const limitX = w / 2 - margin;
+    const limitY = h / 2 - margin;
+    if (behind || Math.abs(dx) > limitX || Math.abs(dy) > limitY) {
+      if (behind && dy < 0) dy = Math.abs(dy) + 1; // behind you: pin to the bottom
+      const scale = Math.min(limitX / Math.max(Math.abs(dx), 1e-3), limitY / Math.max(Math.abs(dy), 1e-3));
+      dx *= scale;
+      dy *= scale;
+    }
+    this.marker.style.transform = `translate(${w / 2 + dx}px, ${h / 2 + dy}px) translate(-50%, -50%)`;
+  }
+
+  // ---------- Map ----------
+
+  get mapOpen() {
+    return !this.mapScreen.classList.contains('hidden');
+  }
+
+  showMap(show: boolean) {
+    this.mapScreen.classList.toggle('hidden', !show);
+  }
+
+  drawMap(data: MapData) {
+    drawMap(this.mapCanvas, data);
+  }
+
+  // ---------- Status ----------
 
   update(player: Player, kills: number) {
     this.heroName.textContent = player.name;
@@ -209,7 +387,7 @@ export class Hud {
     this.stBar.classList.toggle('low', player.stamina < 22);
     this.xpFill.style.width = player.atMaxLevel ? '100%' : `${(player.xp / player.xpToNext) * 100}%`;
     this.xpText.textContent = player.atMaxLevel ? 'Max level' : `${player.xp} / ${player.xpToNext} XP`;
-    this.kills.textContent = `Zombies slain: ${kills}`;
+    this.kills.textContent = `Undead slain: ${kills}`;
     this.vignette.style.opacity = String(player.hurtFlash);
   }
 }

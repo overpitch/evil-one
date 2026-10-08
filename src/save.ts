@@ -1,0 +1,62 @@
+/** The saved game, written whenever the hero touches a checkpoint banner. */
+export interface SaveData {
+  version: 1;
+  name: string;
+  level: number;
+  xp: number;
+  kills: number;
+  /** Id of the checkpoint banner the hero respawns at. */
+  checkpoint: string;
+  /** Ids of captured outposts. */
+  captured: string[];
+  /** Ids of defeated army leaders. */
+  leaders: string[];
+  savedAt: number;
+}
+
+let key = 'evil-one.save';
+
+/** Automated test runs use their own slot so they never touch a real save. */
+export function useTestSaveSlot() {
+  key = 'evil-one.test-save';
+}
+
+export function newSave(name: string): SaveData {
+  return { version: 1, name, level: 1, xp: 0, kills: 0, checkpoint: 'camp', captured: [], leaders: [], savedAt: Date.now() };
+}
+
+export function loadSave(): SaveData | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as Partial<SaveData>;
+    const valid =
+      d.version === 1 &&
+      typeof d.name === 'string' &&
+      Number.isInteger(d.level) &&
+      typeof d.xp === 'number' &&
+      typeof d.kills === 'number' &&
+      typeof d.checkpoint === 'string' &&
+      Array.isArray(d.captured) &&
+      Array.isArray(d.leaders);
+    return valid ? (d as SaveData) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeSave(data: SaveData) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ ...data, savedAt: Date.now() }));
+  } catch {
+    /* storage unavailable: the game still plays, it just won't persist */
+  }
+}
+
+export function clearSave() {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* storage unavailable */
+  }
+}

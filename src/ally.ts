@@ -1,0 +1,289 @@
+import * as THREE from 'three';
+import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid } from './character';
+import type { Zombie } from './enemy';
+import type { GameContext, HitResult, Target } from './types';
+import { heightAt, resolveColliders } from './world';
+import { clamp, dampAngle, easeOutCubic, lerp, smoothing, wrapAngle } from './util';
+import { sfx, volumeAt } from './audio';
+
+type State = 'follow' | 'engage' | 'windup' | 'strike' | 'recover' | 'stagger' | 'dead' | 'gone';
+
+/**
+ * Formation slots around the hero: [to the hero's right, forward]. They
+ * flank the hero rather than trail behind, because the camera sits behind
+ * the hero's right shoulder.
+ */
+const SLOTS: [number, number][] = [[-2.2, 0.4], [2.6, 1], [-4, -1], [4.4, 0.2]];
+export const SQUAD_SIZE = SLOTS.length;
+
+const MAX_HP = 70;
+const ENGAGE_RANGE = 14; // from the soldier
+const LEASH = 24; // from the hero
+const WINDUP = 0.4;
+const RECOVER = 0.55;
+const BLOCK_CHANCE = 0.3;
+const HURT_COLOR = new THREE.Color(0xff2020);
+const SKINS = [0xe0b48a, 0xc68e64, 0x8d5a3b, 0xf1c9a5];
+
+/** A soldier of the human army who follows the hero and fights beside them. */
+export class Ally implements Target {
+  readonly h: Humanoid;
+  readonly pos = new THREE.Vector3();
+  readonly vel = new THREE.Vector3();
+  readonly radius = 0.4;
+  yaw = 0;
+  hp = MAX_HP;
+  state: State = 'gone';
+  stateTime = 0;
+
+  private target: Zombie | null = null;
+  private retargetTimer = 0;
+  private struck = false;
+  private recoverTime = RECOVER;
+  private walkPhase = Math.random() * 10;
+  private hurtFlash = 0;
+  private readonly desired = new THREE.Vector3();
+
+  constructor(scene: THREE.Scene, private readonly slot: number) {
+    this.h = createHumanoid({
+      skin: SKINS[slot % SKINS.length],
+      shirt: 0x8a2a2a,
+      pants: 0x3a3f4a,
+      boots: 0x3b2a1e,
+      eyes: 0x222222,
+      belt: 0x5a3c22,
+      armor: 0x9aa3ab,
+      sword: true,
+    });
+    this.h.root.visible = false;
+    scene.add(this.h.root);
+  }
+
+  get alive() {
+    return this.state !== 'dead' && this.state !== 'gone';
+  }
+
+  /** Brings the soldier (back) into the fight at full health. */
+  reinforce(x: number, z: number) {
+    this.pos.set(x, heightAt(x, z), z);
+    this.vel.set(0, 0, 0);
+    this.hp = MAX_HP;
+    this.target = null;
+    this.hurtFlash = 0;
+    this.h.root.visible = true;
+    this.setState('follow');
+  }
+
+  /** Where this soldier stands in formation behind the hero. */
+  slotPosition(ctx: GameContext, out: THREE.Vector3) {
+    const p = ctx.player;
+    const [right, forward] = SLOTS[this.slot];
+    const fx = Math.sin(p.yaw);
+    const fz = Math.cos(p.yaw);
+    return out.set(p.pos.x + fx * forward - fz * right, 0, p.pos.z + fz * forward + fx * right);
+  }
+
+  update(dt: number, ctx: GameContext) {
+    if (this.state === 'gone') return;
+    this.stateTime += dt;
+    const player = ctx.player;
+
+    // Catch up if left far behind (e.g. the hero respawned).
+    if (this.alive && this.pos.distanceTo(player.pos) > 55) {
+      const s = this.slotPosition(ctx, this.desired);
+      this.reinforce(s.x, s.z);
+    }
+
+    this.retargetTimer -= dt;
+    if (this.retargetTimer <= 0 && this.alive) {
+      this.retargetTimer = 0.5;
+      this.target = this.findTarget(ctx);
+    }
+    if (this.target && !this.target.alive) this.target = null;
+
+    const t = this.target;
+    const dx = t ? t.pos.x - this.pos.x : 0;
+    const dz = t ? t.pos.z - this.pos.z : 0;
+    const dist = t ? Math.max(Math.hypot(dx, dz), 1e-4) : Infinity;
+    const toTargetYaw = Math.atan2(dx, dz);
+    let faceYaw = this.yaw;
+    let accel = 10;
+    this.desired.set(0, 0, 0);
+
+    switch (this.state) {
+      case 'follow': {
+        const slot = this.slotPosition(ctx, this.desired);
+        const sx = slot.x - this.pos.x;
+        const sz = slot.z - this.pos.z;
+        const sd = Math.hypot(sx, sz);
+        const speed = sd > 6 ? 7.5 : sd > 0.6 ? clamp(sd * 2, 0, 5.5) : 0;
+        this.desired.set(sd > 0 ? (sx / sd) * speed : 0, 0, sd > 0 ? (sz / sd) * speed : 0);
+        faceYaw = speed > 2 ? Math.atan2(sx, sz) : player.yaw;
+        if (t) this.setState('engage');
+        break;
+      }
+      case 'engage':
+        if (!t) {
+          this.setState('follow');
+          break;
+        }
+        faceYaw = toTargetYaw;
+        if (dist > 1.5 + t.radius) this.desired.set(dx / dist, 0, dz / dist).multiplyScalar(5.5);
+        else this.setState('windup');
+        break;
+      case 'windup':
+        faceYaw = toTargetYaw;
+        if (this.stateTime >= WINDUP) {
+          this.struck = false;
+          this.setState('strike');
+        }
+        break;
+      case 'strike':
+        faceYaw = toTargetYaw;
+        accel = 20;
+        this.desired.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(2);
+        if (!this.struck && this.stateTime >= 0.05) {
+          this.struck = true;
+          sfx.swing(false, volumeAt(this.pos.distanceTo(player.pos)) * 0.4);
+          if (t && dist < 2.3 + t.radius && Math.abs(wrapAngle(toTargetYaw - this.yaw)) < 1.1) {
+            t.takeHit(10 + 2 * player.level, new THREE.Vector3(dx / dist, 0, dz / dist), 3, false, ctx, this);
+          }
+        }
+        if (this.stateTime >= 0.18) {
+          this.recoverTime = RECOVER + Math.random() * 0.35;
+          this.setState('recover');
+        }
+        break;
+      case 'recover':
+        faceYaw = t ? toTargetYaw : this.yaw;
+        if (this.stateTime >= this.recoverTime) this.setState(t ? 'engage' : 'follow');
+        break;
+      case 'stagger':
+        accel = 6;
+        if (this.stateTime >= 0.35) this.setState(t ? 'engage' : 'follow');
+        break;
+      case 'dead':
+        accel = 5;
+        if (this.stateTime > 4) {
+          this.setState('gone');
+          this.h.root.visible = false;
+        }
+        break;
+    }
+
+    if (this.alive) this.yaw = dampAngle(this.yaw, faceYaw, 10, dt);
+    const k = smoothing(accel, dt);
+    this.vel.x += (this.desired.x - this.vel.x) * k;
+    this.vel.z += (this.desired.z - this.vel.z) * k;
+    this.pos.x += this.vel.x * dt;
+    this.pos.z += this.vel.z * dt;
+    resolveColliders(this.pos, this.radius, ctx.colliders);
+    this.pos.y = heightAt(this.pos.x, this.pos.z);
+    this.hurtFlash = Math.max(0, this.hurtFlash - dt * 3);
+    this.animate(dt);
+  }
+
+  takeDamage(amount: number, from: THREE.Vector3, ctx: GameContext, unblockable = false): HitResult {
+    if (!this.alive) return 'ignored';
+    const dx = from.x - this.pos.x;
+    const dz = from.z - this.pos.z;
+    const d = Math.max(Math.hypot(dx, dz), 1e-4);
+    const vol = volumeAt(this.pos.distanceTo(ctx.player.pos)) * 0.6;
+    const facing = Math.abs(wrapAngle(Math.atan2(dx, dz) - this.yaw)) < 1.2;
+    if (!unblockable && facing && this.state !== 'stagger' && Math.random() < BLOCK_CHANCE) {
+      sfx.block(vol);
+      ctx.particles.burst(new THREE.Vector3(this.pos.x + (dx / d) * 0.6, this.pos.y + 1.4, this.pos.z + (dz / d) * 0.6), 0xffd36b, 8, 4);
+      return 'blocked';
+    }
+    this.hp -= amount;
+    this.hurtFlash = 1;
+    this.vel.set(-dx / d, 0, -dz / d).multiplyScalar(4);
+    ctx.particles.burst(new THREE.Vector3(this.pos.x, this.pos.y + 1.2, this.pos.z), 0x8a0f0f, 6, 3);
+    sfx.hurt(vol);
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.target = null;
+      this.setState('dead');
+    } else {
+      this.setState('stagger');
+    }
+    return 'hit';
+  }
+
+  private findTarget(ctx: GameContext): Zombie | null {
+    if (ctx.peaceful) return null;
+    let best: Zombie | null = null;
+    let bestDist = ENGAGE_RANGE;
+    for (const z of ctx.enemies) {
+      if (!z.alive || z.state === 'rising') continue;
+      if (z.pos.distanceTo(ctx.player.pos) > LEASH) continue;
+      const d = z.pos.distanceTo(this.pos);
+      if (d < bestDist) {
+        bestDist = d;
+        best = z;
+      }
+    }
+    return best;
+  }
+
+  private setState(state: State) {
+    this.state = state;
+    this.stateTime = 0;
+  }
+
+  private animate(dt: number) {
+    const h = this.h;
+    h.root.position.copy(this.pos);
+    h.root.rotation.y = this.yaw;
+    resetPose(h);
+
+    const speed = Math.hypot(this.vel.x, this.vel.z);
+    this.walkPhase += dt * speed * 2.1;
+    const amp = Math.min(speed / 5, 1.3);
+    const step = Math.sin(this.walkPhase) * 0.75 * amp;
+    h.hips.position.y = HIPS_HEIGHT + Math.abs(Math.cos(this.walkPhase)) * 0.05 * amp;
+    h.legL.rotation.x = step;
+    h.legR.rotation.x = -step;
+    h.armL.rotation.set(-step * 0.7, 0, 0.08);
+    h.armR.rotation.set(-0.35 + step * 0.3, 0, -0.08);
+    const sword = h.sword!;
+    sword.rotation.set(-0.1, 0, 0);
+
+    switch (this.state) {
+      case 'windup': {
+        const k = easeOutCubic(Math.min(this.stateTime / WINDUP, 1));
+        h.armR.rotation.set(lerp(-0.35, -2.2, k), lerp(0, -1.0, k), 0);
+        sword.rotation.x = lerp(-0.1, Math.PI / 2, k);
+        h.torso.rotation.y = -0.3 * k;
+        break;
+      }
+      case 'strike': {
+        const k = easeOutCubic(Math.min(this.stateTime / 0.15, 1));
+        h.armR.rotation.set(lerp(-2.2, -1.2, k), lerp(-1.0, 0.9, k), 0);
+        sword.rotation.x = Math.PI / 2;
+        h.torso.rotation.y = lerp(-0.3, 0.3, k);
+        break;
+      }
+      case 'recover': {
+        const k = Math.min(this.stateTime / this.recoverTime, 1);
+        h.armR.rotation.set(lerp(-1.2, -0.35, k), lerp(0.9, 0, k), 0);
+        sword.rotation.x = lerp(Math.PI / 2, -0.1, k);
+        break;
+      }
+      case 'stagger':
+        h.torso.rotation.x = -0.3;
+        h.armL.rotation.set(-0.5, 0, 0.6);
+        h.armR.rotation.set(-0.5, 0, -0.6);
+        break;
+      case 'dead': {
+        const k = easeOutCubic(Math.min(this.stateTime / 0.7, 1));
+        h.hips.rotation.x = -1.45 * k;
+        h.hips.position.y = lerp(HIPS_HEIGHT, 0.3, k);
+        h.legL.rotation.x = h.legR.rotation.x = 0;
+        if (this.stateTime > 2.5) h.root.position.y -= (this.stateTime - 2.5) * 0.5;
+        break;
+      }
+    }
+    setFlash(h, HURT_COLOR, this.hurtFlash * 0.5);
+  }
+}

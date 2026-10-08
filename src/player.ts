@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid } from './character';
 import type { Input } from './input';
-import type { GameContext } from './types';
+import type { GameContext, HitResult, Target } from './types';
 import { heightAt, resolveColliders } from './world';
 import { dampAngle, easeInOutQuad, easeOutCubic, lerp, smoothing, wrapAngle } from './util';
 import { sfx } from './audio';
@@ -54,7 +54,7 @@ const PLAYER_LOOK = {
 
 const HURT_COLOR = new THREE.Color(0xff2020);
 
-export class Player {
+export class Player implements Target {
   readonly h: Humanoid;
   readonly pos = new THREE.Vector3();
   readonly vel = new THREE.Vector3();
@@ -68,6 +68,8 @@ export class Player {
   damageMultiplier = 1;
   maxHp = 100;
   hp = 100;
+  /** Seconds since the hero last took damage. */
+  sinceHurt = 99;
   maxStamina = 100;
   stamina = 100;
   blocking = false;
@@ -78,7 +80,6 @@ export class Player {
   stateTime = 0;
 
   private staminaDelay = 0;
-  private sinceHurt = 0;
   private combo = 0;
   private comboQueued = false;
   private readonly swingHits = new Set<object>();
@@ -136,11 +137,11 @@ export class Player {
     return gained;
   }
 
-  /** Starts a brand-new hero at level 1. */
-  newHero(name: string) {
+  /** Sets up the hero from a save (or a brand-new one at level 1). */
+  loadHero(name: string, level = 1, xp = 0) {
     this.name = name;
-    this.level = 1;
-    this.xp = 0;
+    this.level = Math.min(Math.max(1, level), MAX_LEVEL);
+    this.xp = this.atMaxLevel ? 0 : Math.max(0, xp);
     this.applyLevelStats();
   }
 
@@ -151,6 +152,7 @@ export class Player {
     this.damageMultiplier = stats.damageMultiplier;
   }
 
+  /** Full health and stamina, standing at (x, z). */
   reset(x: number, z: number) {
     this.pos.set(x, heightAt(x, z), z);
     this.vel.set(0, 0, 0);
@@ -256,14 +258,14 @@ export class Player {
   }
 
   /** Returns what happened so attackers can react (a blocked attacker staggers). */
-  takeDamage(amount: number, from: THREE.Vector3, ctx: GameContext): 'ignored' | 'blocked' | 'hit' {
+  takeDamage(amount: number, from: THREE.Vector3, ctx: GameContext, unblockable = false): HitResult {
     if (!this.alive || this.invulnerable) return 'ignored';
     const dx = from.x - this.pos.x;
     const dz = from.z - this.pos.z;
     const away = new THREE.Vector3(-dx, 0, -dz).normalize();
     const attackerInFront = Math.abs(wrapAngle(Math.atan2(dx, dz) - this.yaw)) < 1.4;
 
-    if (this.blocking && attackerInFront) {
+    if (this.blocking && attackerInFront && !unblockable) {
       const cost = amount * 1.8;
       const sparkAt = new THREE.Vector3(this.pos.x - away.x * 0.6, this.pos.y + 1.4, this.pos.z - away.z * 0.6);
       ctx.particles.burst(sparkAt, 0xffd36b, 12, 5);
@@ -337,7 +339,7 @@ export class Player {
         ctx.addShake(sw.heavy ? 0.5 : 0.28);
       }
       this.swingHits.add(e);
-      e.takeHit(Math.round(sw.damage * this.damageMultiplier), new THREE.Vector3(dx, 0, dz).normalize(), sw.knockback, sw.heavy, ctx);
+      e.takeHit(Math.round(sw.damage * this.damageMultiplier), new THREE.Vector3(dx, 0, dz).normalize(), sw.knockback, sw.heavy, ctx, this);
     }
   }
 

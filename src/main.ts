@@ -1,18 +1,28 @@
 import './style.css';
 import * as THREE from 'three';
 import { Input } from './input';
-import { createWorld } from './world';
+import { createWorld, respawnPoint } from './world';
 import { Player } from './player';
 import { Zombie } from './enemy';
+import { Ally, SQUAD_SIZE } from './ally';
 import { ThirdPersonCamera } from './camera';
 import { Hud } from './hud';
 import { Particles } from './particles';
 import { Floaters } from './floaters';
 import { initAudio, sfx } from './audio';
+import { Campaign, type Objective } from './campaign';
+import { CAMP_BANNER } from './layout';
+import { loadSettings, saveSettings, type Settings } from './settings';
+import { loadSave, newSave, useTestSaveSlot, writeSave, type SaveData } from './save';
+import type { MapData } from './map';
 import type { GameContext } from './types';
 
-// ?test skips the menus and runs without pointer lock (for automated checks).
+// ?test skips the menus, uses a separate save slot, and runs without pointer lock (for automated checks).
 const testMode = new URLSearchParams(location.search).has('test');
+if (testMode) useTestSaveSlot();
+
+/** Zombies farther than this (on either axis) are hidden and not simulated. */
+const ACTIVE_RANGE = 80;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -28,16 +38,18 @@ const particles = new Particles(scene);
 const player = new Player(scene);
 const camCtrl = new ThirdPersonCamera(camera);
 const input = new Input(renderer.domElement);
-const hud = new Hud();
+const settings = loadSettings();
+const hud = new Hud(settings);
 const floaters = new Floaters(hud.floaterLayer);
-camCtrl.sensitivity = hud.sensitivity;
 
-const PLAYER_SPAWN: [number, number] = [0, -6];
-const ZOMBIE_SPAWNS: [number, number][] = [[0, 10], [-7, 13], [7, 14], [-12, 4], [12, 6], [-4, 18], [5, 20]];
-const ZOMBIE_COUNT = 3;
+function applySettings(s: Settings) {
+  camCtrl.sensitivity = s.sensitivity;
+  camCtrl.invertY = s.invertY;
+}
+applySettings(settings);
 
 const enemies: Zombie[] = [];
-for (let i = 0; i < ZOMBIE_COUNT; i++) enemies.push(new Zombie(scene, ...ZOMBIE_SPAWNS[i]));
+const allies = Array.from({ length: SQUAD_SIZE }, (_, i) => new Ally(scene, i));
 
 /** 'menu' covers the title, naming and intro screens; the world idles behind them. */
 let phase: 'menu' | 'playing' = 'menu';
@@ -45,11 +57,13 @@ let kills = 0;
 let hitStopTimer = 0;
 let deathShown = false;
 let menuOrbit = 0;
+let pendingName = '';
 
 const ctx: GameContext = {
   scene,
   colliders: world.colliders,
   player,
+  allies,
   enemies,
   particles,
   peaceful: true,
@@ -61,41 +75,92 @@ const ctx: GameContext = {
   onEnemyKilled: (z) => {
     kills++;
     floaters.spawn(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP`, 'xp');
-    const gained = player.gainXp(z.xpReward);
-    if (gained > 0) celebrateLevelUp();
+    awardXp(z.xpReward);
   },
+  summonMinions: (around, count) => campaign.summonMinions(around, count),
 };
 
-function celebrateLevelUp() {
-  const at = new THREE.Vector3(player.pos.x, player.pos.y + 1, player.pos.z);
-  particles.burst(at, 0xffd36b, 30, 6);
-  particles.burst(at, 0xfff2b0, 15, 4);
-  camCtrl.addShake(0.2);
-  sfx.levelUp();
-  hud.showLevelUp(player.level);
+const campaign = new Campaign(scene, world, enemies, {
+  announce: (title, detail) => hud.announce(title, detail),
+  say: (speaker, line) => hud.say(speaker, line),
+  checkpointReached: () => {
+    player.hp = player.maxHp;
+    player.stamina = player.maxStamina;
+    reinforceSquad();
+    saveGame();
+  },
+  awardXp: (amount, at) => {
+    floaters.spawn(at, `+${amount} XP`, 'xp');
+    awardXp(amount);
+  },
+  bossStarted: (name) => hud.showBoss(name),
+  bossEnded: () => hud.showBoss(null),
+  save: () => saveGame(),
+});
+
+function awardXp(amount: number) {
+  if (player.gainXp(amount) > 0) {
+    const at = new THREE.Vector3(player.pos.x, player.pos.y + 1, player.pos.z);
+    particles.burst(at, 0xffd36b, 30, 6);
+    particles.burst(at, 0xfff2b0, 15, 4);
+    camCtrl.addShake(0.2);
+    sfx.levelUp();
+    hud.showLevelUp(player.level);
+  }
 }
 
-function respawnZombie(z: Zombie) {
-  const options = ZOMBIE_SPAWNS.filter(([x, sz]) => Math.hypot(x - player.pos.x, sz - player.pos.z) > 10);
-  const [x, sz] = options[Math.floor(Math.random() * options.length)] ?? ZOMBIE_SPAWNS[0];
-  z.spawn(x, sz);
+function saveGame() {
+  writeSave({
+    version: 1,
+    name: player.name,
+    level: player.level,
+    xp: player.xp,
+    kills,
+    ...campaign.saveFields(),
+    savedAt: Date.now(),
+  });
 }
 
-/** Puts the hero back at the training ground at full health and resets the zombies. Keeps level and XP. */
-function resetArena() {
-  player.reset(...PLAYER_SPAWN);
+/** Fallen soldiers are replaced by fresh ones in formation behind the hero. */
+function reinforceSquad(everyone = false) {
+  const slot = new THREE.Vector3();
+  for (const a of allies) {
+    if (everyone || !a.alive) {
+      a.slotPosition(ctx, slot);
+      a.reinforce(slot.x, slot.z);
+    }
+  }
+}
+
+/** Starts (or restarts after death) play from a save: hero, territory and position. */
+function enterWorld(save: SaveData) {
+  player.loadHero(save.name, save.level, save.xp);
+  kills = save.kills;
+  campaign.load(save);
+  const spot = respawnPoint(campaign.current.banner);
+  player.reset(spot.x, spot.z);
+  reinforceSquad(true);
   camCtrl.yaw = 0;
   camCtrl.pitch = 0.12;
   camCtrl.cut();
-  enemies.forEach((z, i) => z.spawn(...ZOMBIE_SPAWNS[i]));
   floaters.clear();
   hitStopTimer = 0;
   deathShown = false;
+  hud.showDeath(false);
+  hud.showMap(false);
+  hud.showScreen('none');
+  phase = 'playing';
+  ctx.peaceful = false;
 }
 
-/** Keeps bodies from overlapping; the hero is harder to shove than a zombie. */
+const mass = (b: Player | Ally | Zombie) =>
+  b === player ? 3 : b === campaign.king ? 12 : b instanceof Zombie ? (b.radius > 0.5 ? 2.5 : 1) : 1;
+
+/** Keeps bodies from overlapping; heavier bodies get pushed less. */
 function separateBodies() {
-  const bodies: (Player | Zombie)[] = [player, ...enemies.filter((e) => e.alive)];
+  const bodies: (Player | Ally | Zombie)[] = [player];
+  for (const a of allies) if (a.alive) bodies.push(a);
+  for (const z of enemies) if (z.alive && z.pos.distanceToSquared(player.pos) < 40 * 40) bodies.push(z);
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i];
@@ -106,7 +171,9 @@ function separateBodies() {
       const d = Math.hypot(dx, dz);
       if (d >= min || d < 1e-6) continue;
       const overlap = (min - d) / d;
-      const aShare = a === player ? 0.25 : 0.5;
+      const ma = mass(a);
+      const mb = mass(b);
+      const aShare = mb / (ma + mb);
       a.pos.x -= dx * overlap * aShare;
       a.pos.z -= dz * overlap * aShare;
       b.pos.x += dx * overlap * (1 - aShare);
@@ -115,16 +182,29 @@ function separateBodies() {
   }
 }
 
-// ---------- Menu flow: title → name → intro → play ----------
-
-function startGame(name: string) {
-  player.newHero(name);
-  kills = 0;
-  resetArena();
-  phase = 'playing';
-  ctx.peaceful = false;
-  hud.showScreen('none');
+function updateEnemies(dt: number) {
+  for (const z of enemies) {
+    if (z.state === 'dormant') continue;
+    const near = Math.abs(z.pos.x - player.pos.x) < ACTIVE_RANGE && Math.abs(z.pos.z - player.pos.z) < ACTIVE_RANGE;
+    if (near) z.update(dt, ctx);
+    else z.sleep(dt);
+  }
 }
+
+function mapData(objective: Objective): MapData {
+  return {
+    player: { x: player.pos.x, z: player.pos.z, yaw: player.yaw },
+    allies: allies.filter((a) => a.alive).map((a) => ({ x: a.pos.x, z: a.pos.z })),
+    outposts: campaign.outposts.map((o) => ({ x: o.def.x, z: o.def.z, name: o.def.name, captured: o.captured })),
+    checkpoints: campaign.checkpoints
+      .filter((c) => c.unlocked)
+      .map((c) => ({ x: c.banner.x, z: c.banner.z, current: c === campaign.current })),
+    kingDefeated: campaign.kingDefeated,
+    objective: objective.at ? { x: objective.at.x, z: objective.at.z } : null,
+  };
+}
+
+// ---------- Menu flow: title → (name → intro | continue) → play ----------
 
 /** Grabs the pointer. If the browser refuses, the pause screen offers a Resume button. */
 function lockPointer() {
@@ -133,31 +213,45 @@ function lockPointer() {
   (document.activeElement as HTMLElement | null)?.blur();
   input.requestLock();
   setTimeout(() => {
-    if (phase === 'playing' && !input.locked && player.alive) hud.showPause(true);
+    if (phase === 'playing' && !input.locked && player.alive && !hud.optionsOpen) hud.showPause(true);
   }, 1200);
 }
 
+hud.onContinue = () => {
+  const save = loadSave();
+  if (!save) {
+    hud.showTitle(null);
+    return;
+  }
+  enterWorld(save);
+  lockPointer();
+};
 hud.onNewGame = () => {
   initAudio();
   hud.showScreen('name');
 };
 hud.onNameChosen = (name) => {
-  player.name = name;
+  pendingName = name;
   hud.showIntro(name);
 };
 hud.onBegin = () => {
-  startGame(player.name);
+  const save = newSave(pendingName);
+  writeSave(save);
+  enterWorld(save);
   lockPointer();
 };
 hud.onResume = lockPointer;
 hud.onRespawn = () => {
-  resetArena();
-  hud.showDeath(false);
+  enterWorld(loadSave() ?? newSave(player.name));
   lockPointer();
 };
-hud.onSensitivity = (v) => (camCtrl.sensitivity = v);
+hud.onSettings = (s) => {
+  applySettings(s);
+  saveSettings(s);
+};
 input.onLockChange = (locked) => {
-  if (phase === 'playing') hud.showPause(!locked && player.alive);
+  if (!locked) hud.showMap(false);
+  if (phase === 'playing' && !hud.optionsOpen) hud.showPause(!locked && player.alive);
 };
 
 window.addEventListener('resize', () => {
@@ -166,9 +260,19 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-if (testMode) startGame('Tester');
-else hud.showScreen('title');
-resetArena();
+// The world behind the title screen reflects the saved game.
+const existingSave = loadSave();
+campaign.load(existingSave);
+const campSpot = respawnPoint(CAMP_BANNER);
+player.reset(campSpot.x, campSpot.z);
+reinforceSquad(true);
+if (testMode) {
+  const save = newSave('Tester');
+  writeSave(save);
+  enterWorld(save);
+} else {
+  hud.showTitle(existingSave);
+}
 
 // ---------- Main loop ----------
 
@@ -176,7 +280,7 @@ resetArena();
 function updateMenuCamera(dt: number) {
   menuOrbit += dt * 0.07;
   const p = player.pos;
-  camera.position.set(p.x + Math.sin(menuOrbit) * 7.5, p.y + 2.6, p.z + Math.cos(menuOrbit) * 7.5);
+  camera.position.set(p.x + Math.sin(menuOrbit) * 8.5, p.y + 2.8, p.z + Math.cos(menuOrbit) * 8.5);
   camera.lookAt(p.x, p.y + 1.4, p.z);
 }
 
@@ -184,11 +288,11 @@ function updateMenuCamera(dt: number) {
 function tick(realDt: number) {
   if (phase === 'menu') {
     player.idle(realDt);
-    for (const z of enemies) z.update(realDt, ctx);
-    separateBodies();
+    for (const a of allies) a.update(realDt, ctx);
     updateMenuCamera(realDt);
   } else {
     if (input.locked || testMode) {
+      if (input.wasPressed('KeyM')) hud.showMap(!hud.mapOpen);
       camCtrl.applyInput(input);
       let dt = realDt;
       // Hit-stop: freeze the action for a few frames when a blow lands.
@@ -197,24 +301,38 @@ function tick(realDt: number) {
         dt *= 0.06;
       }
       player.update(dt, ctx, input, camCtrl.yaw);
-      for (const z of enemies) {
-        z.update(dt, ctx);
-        if (z.readyToRespawn) respawnZombie(z);
-      }
+      for (const a of allies) a.update(dt, ctx);
+      updateEnemies(dt);
       separateBodies();
+      campaign.update(dt, ctx);
       particles.update(dt);
       floaters.update(dt, camera);
     }
     camCtrl.update(realDt, player.pos);
+    camera.updateMatrixWorld();
+    // Soldiers who wander right in front of the lens are hidden so they don't block the view.
+    for (const a of allies) {
+      if (a.state === 'gone') continue;
+      const dx = a.pos.x - camera.position.x;
+      const dy = a.pos.y + 1.2 - camera.position.y;
+      const dz = a.pos.z - camera.position.z;
+      a.h.root.visible = dx * dx + dy * dy + dz * dz > 1.6 * 1.6;
+    }
 
     if (!player.alive && player.stateTime > 1.6 && !deathShown) {
       deathShown = true;
+      hud.showMap(false);
       if (document.pointerLockElement) document.exitPointerLock();
       hud.showDeath(true);
     }
+
+    const objective = campaign.objective(player.pos);
+    hud.setObjective(objective.text, objective.at, camera, player.pos);
+    if (campaign.bossState === 'fighting') hud.setBossHealth(campaign.king.healthFraction);
+    if (hud.mapOpen) hud.drawMap(mapData(objective));
   }
 
-  world.update(player.pos);
+  world.update(player.pos, realDt, campaign.gloomAt(player.pos));
   for (const z of enemies) z.updateBar(camera);
   hud.update(player, kills);
   input.endFrame();
@@ -234,12 +352,15 @@ requestAnimationFrame(frame);
 Object.assign(window, {
   __game: {
     player,
+    allies,
     enemies,
+    campaign,
     camCtrl,
     camera,
     renderer,
     input,
     scene,
+    hud,
     get phase() {
       return phase;
     },
