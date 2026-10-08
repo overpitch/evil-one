@@ -7,10 +7,11 @@ import { Zombie } from './enemy';
 import { ThirdPersonCamera } from './camera';
 import { Hud } from './hud';
 import { Particles } from './particles';
-import { initAudio } from './audio';
+import { Floaters } from './floaters';
+import { initAudio, sfx } from './audio';
 import type { GameContext } from './types';
 
-// ?test runs the game without pointer lock (for automated checks).
+// ?test skips the menus and runs without pointer lock (for automated checks).
 const testMode = new URLSearchParams(location.search).has('test');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -28,6 +29,7 @@ const player = new Player(scene);
 const camCtrl = new ThirdPersonCamera(camera);
 const input = new Input(renderer.domElement);
 const hud = new Hud();
+const floaters = new Floaters(hud.floaterLayer);
 camCtrl.sensitivity = hud.sensitivity;
 
 const PLAYER_SPAWN: [number, number] = [0, -6];
@@ -37,9 +39,12 @@ const ZOMBIE_COUNT = 3;
 const enemies: Zombie[] = [];
 for (let i = 0; i < ZOMBIE_COUNT; i++) enemies.push(new Zombie(scene, ...ZOMBIE_SPAWNS[i]));
 
+/** 'menu' covers the title, naming and intro screens; the world idles behind them. */
+let phase: 'menu' | 'playing' = 'menu';
 let kills = 0;
 let hitStopTimer = 0;
 let deathShown = false;
+let menuOrbit = 0;
 
 const ctx: GameContext = {
   scene,
@@ -47,14 +52,28 @@ const ctx: GameContext = {
   player,
   enemies,
   particles,
+  peaceful: true,
+  floatText: (at, text, kind) => floaters.spawn(at, text, kind),
   addShake: (amount) => camCtrl.addShake(amount),
   hitStop: (seconds) => {
     hitStopTimer = Math.max(hitStopTimer, seconds);
   },
-  onEnemyKilled: () => {
+  onEnemyKilled: (z) => {
     kills++;
+    floaters.spawn(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP`, 'xp');
+    const gained = player.gainXp(z.xpReward);
+    if (gained > 0) celebrateLevelUp();
   },
 };
+
+function celebrateLevelUp() {
+  const at = new THREE.Vector3(player.pos.x, player.pos.y + 1, player.pos.z);
+  particles.burst(at, 0xffd36b, 30, 6);
+  particles.burst(at, 0xfff2b0, 15, 4);
+  camCtrl.addShake(0.2);
+  sfx.levelUp();
+  hud.showLevelUp(player.level);
+}
 
 function respawnZombie(z: Zombie) {
   const options = ZOMBIE_SPAWNS.filter(([x, sz]) => Math.hypot(x - player.pos.x, sz - player.pos.z) > 10);
@@ -62,12 +81,15 @@ function respawnZombie(z: Zombie) {
   z.spawn(x, sz);
 }
 
-function resetGame() {
+/** Puts the hero back at the training ground at full health and resets the zombies. Keeps level and XP. */
+function resetArena() {
   player.reset(...PLAYER_SPAWN);
   camCtrl.yaw = 0;
   camCtrl.pitch = 0.12;
   camCtrl.cut();
   enemies.forEach((z, i) => z.spawn(...ZOMBIE_SPAWNS[i]));
+  floaters.clear();
+  hitStopTimer = 0;
   deathShown = false;
 }
 
@@ -93,21 +115,50 @@ function separateBodies() {
   }
 }
 
-// ---------- UI wiring ----------
+// ---------- Menu flow: title → name → intro → play ----------
 
-const startPlaying = () => {
+function startGame(name: string) {
+  player.newHero(name);
+  kills = 0;
+  resetArena();
+  phase = 'playing';
+  ctx.peaceful = false;
+  hud.showScreen('none');
+}
+
+/** Grabs the pointer. If the browser refuses, the pause screen offers a Resume button. */
+function lockPointer() {
   initAudio();
+  if (testMode) return;
+  (document.activeElement as HTMLElement | null)?.blur();
   input.requestLock();
+  setTimeout(() => {
+    if (phase === 'playing' && !input.locked && player.alive) hud.showPause(true);
+  }, 1200);
+}
+
+hud.onNewGame = () => {
+  initAudio();
+  hud.showScreen('name');
 };
-hud.onPlay = startPlaying;
+hud.onNameChosen = (name) => {
+  player.name = name;
+  hud.showIntro(name);
+};
+hud.onBegin = () => {
+  startGame(player.name);
+  lockPointer();
+};
+hud.onResume = lockPointer;
 hud.onRespawn = () => {
-  resetGame();
+  resetArena();
   hud.showDeath(false);
-  startPlaying();
+  lockPointer();
 };
 hud.onSensitivity = (v) => (camCtrl.sensitivity = v);
-input.onLockChange = (locked) => hud.showPause(!locked && player.alive);
-if (testMode) hud.showPause(false);
+input.onLockChange = (locked) => {
+  if (phase === 'playing') hud.showPause(!locked && player.alive);
+};
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -115,39 +166,56 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+if (testMode) startGame('Tester');
+else hud.showScreen('title');
+resetArena();
+
 // ---------- Main loop ----------
 
-resetGame();
+/** Slow orbit around the hero while the menus are up. */
+function updateMenuCamera(dt: number) {
+  menuOrbit += dt * 0.07;
+  const p = player.pos;
+  camera.position.set(p.x + Math.sin(menuOrbit) * 7.5, p.y + 2.6, p.z + Math.cos(menuOrbit) * 7.5);
+  camera.lookAt(p.x, p.y + 1.4, p.z);
+}
 
 /** Advances the game by one frame of `realDt` seconds. */
 function tick(realDt: number) {
-  if (input.locked || testMode) {
-    camCtrl.applyInput(input);
-    let dt = realDt;
-    // Hit-stop: freeze the action for a few frames when a blow lands.
-    if (hitStopTimer > 0) {
-      hitStopTimer -= realDt;
-      dt *= 0.06;
-    }
-    player.update(dt, ctx, input, camCtrl.yaw);
-    for (const z of enemies) {
-      z.update(dt, ctx);
-      if (z.readyToRespawn) respawnZombie(z);
-    }
+  if (phase === 'menu') {
+    player.idle(realDt);
+    for (const z of enemies) z.update(realDt, ctx);
     separateBodies();
-    particles.update(dt);
+    updateMenuCamera(realDt);
+  } else {
+    if (input.locked || testMode) {
+      camCtrl.applyInput(input);
+      let dt = realDt;
+      // Hit-stop: freeze the action for a few frames when a blow lands.
+      if (hitStopTimer > 0) {
+        hitStopTimer -= realDt;
+        dt *= 0.06;
+      }
+      player.update(dt, ctx, input, camCtrl.yaw);
+      for (const z of enemies) {
+        z.update(dt, ctx);
+        if (z.readyToRespawn) respawnZombie(z);
+      }
+      separateBodies();
+      particles.update(dt);
+      floaters.update(dt, camera);
+    }
+    camCtrl.update(realDt, player.pos);
+
+    if (!player.alive && player.stateTime > 1.6 && !deathShown) {
+      deathShown = true;
+      if (document.pointerLockElement) document.exitPointerLock();
+      hud.showDeath(true);
+    }
   }
 
   world.update(player.pos);
-  camCtrl.update(realDt, player.pos);
   for (const z of enemies) z.updateBar(camera);
-
-  if (!player.alive && player.stateTime > 1.6 && !deathShown) {
-    deathShown = true;
-    if (document.pointerLockElement) document.exitPointerLock();
-    hud.showDeath(true);
-  }
-
   hud.update(player, kills);
   input.endFrame();
 }
@@ -172,6 +240,9 @@ Object.assign(window, {
     renderer,
     input,
     scene,
+    get phase() {
+      return phase;
+    },
     step(seconds: number) {
       for (let i = 0; i < Math.round(seconds * 60); i++) tick(1 / 60);
       renderer.render(scene, camera);

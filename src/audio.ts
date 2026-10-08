@@ -126,6 +126,18 @@ export const sfx = {
     noiseSource(a, t, 0.4).connect(f).connect(envelope(a, t, 0.3, 0.05, 0.3));
   },
 
+  levelUp() {
+    const a = ready();
+    if (!a) return;
+    const t = a.currentTime;
+    // Rising major arpeggio with a shimmering top note.
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+      const start = t + i * 0.09;
+      tone(a, 'triangle', f, f, start, 0.6).connect(envelope(a, start, 0.28, 0.01, i === 3 ? 0.9 : 0.4));
+      tone(a, 'sine', f * 2, f * 2, start, 0.4).connect(envelope(a, start, 0.06, 0.01, 0.35));
+    });
+  },
+
   /** vol is 0..1, usually from distance to the listener. */
   groan(vol = 1) {
     const base = 70 + Math.random() * 30;

@@ -5,6 +5,7 @@ import type { GameContext } from './types';
 import { heightAt, resolveColliders } from './world';
 import { dampAngle, easeInOutQuad, easeOutCubic, lerp, smoothing, wrapAngle } from './util';
 import { sfx } from './audio';
+import { MAX_LEVEL, statsForLevel, xpToNext } from './progression';
 
 type State = 'move' | 'attack' | 'roll' | 'stagger' | 'dead';
 
@@ -60,6 +61,11 @@ export class Player {
   readonly radius = 0.4;
   yaw = 0;
 
+  name = 'Soldier';
+  level = 1;
+  /** XP earned toward the next level. */
+  xp = 0;
+  damageMultiplier = 1;
   maxHp = 100;
   hp = 100;
   maxStamina = 100;
@@ -101,6 +107,48 @@ export class Player {
   /** Dodge rolls have invincibility frames. */
   get invulnerable() {
     return this.state === 'roll' && this.stateTime > 0.03 && this.stateTime < 0.42;
+  }
+
+  get xpToNext() {
+    return xpToNext(this.level);
+  }
+
+  get atMaxLevel() {
+    return this.level >= MAX_LEVEL;
+  }
+
+  /** Adds XP and returns how many levels were gained. Leveling up fully heals. */
+  gainXp(amount: number): number {
+    if (this.atMaxLevel) return 0;
+    this.xp += amount;
+    let gained = 0;
+    while (!this.atMaxLevel && this.xp >= this.xpToNext) {
+      this.xp -= this.xpToNext;
+      this.level++;
+      gained++;
+    }
+    if (this.atMaxLevel) this.xp = 0;
+    if (gained > 0) {
+      this.applyLevelStats();
+      this.hp = this.maxHp;
+      this.stamina = this.maxStamina;
+    }
+    return gained;
+  }
+
+  /** Starts a brand-new hero at level 1. */
+  newHero(name: string) {
+    this.name = name;
+    this.level = 1;
+    this.xp = 0;
+    this.applyLevelStats();
+  }
+
+  private applyLevelStats() {
+    const stats = statsForLevel(this.level);
+    this.maxHp = stats.maxHp;
+    this.maxStamina = stats.maxStamina;
+    this.damageMultiplier = stats.damageMultiplier;
   }
 
   reset(x: number, z: number) {
@@ -289,11 +337,17 @@ export class Player {
         ctx.addShake(sw.heavy ? 0.5 : 0.28);
       }
       this.swingHits.add(e);
-      e.takeHit(sw.damage, new THREE.Vector3(dx, 0, dz).normalize(), sw.knockback, sw.heavy, ctx);
+      e.takeHit(Math.round(sw.damage * this.damageMultiplier), new THREE.Vector3(dx, 0, dz).normalize(), sw.knockback, sw.heavy, ctx);
     }
   }
 
   // ---------- Procedural animation ----------
+
+  /** Just animates in place (used behind the menus). */
+  idle(dt: number) {
+    this.vel.set(0, 0, 0);
+    this.animate(dt);
+  }
 
   private animate(dt: number) {
     const h = this.h;

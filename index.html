@@ -9,31 +9,65 @@
   <body>
     <div id="app"></div>
 
-    <div id="hud">
+    <div id="hud" class="hidden">
       <div class="status">
-        <div class="hero-name" id="hero-name">Soldier</div>
+        <div class="hero-row">
+          <span class="hero-name" id="hero-name">Soldier</span>
+          <span class="level-badge" id="level-badge">Lv 1</span>
+        </div>
         <div class="bar health"><div class="fill" id="hp-fill"></div><span id="hp-text"></span></div>
         <div class="bar stamina" id="st-bar"><div class="fill" id="st-fill"></div></div>
+        <div class="bar xp"><div class="fill" id="xp-fill"></div></div>
+        <div class="xp-text" id="xp-text"></div>
       </div>
       <div class="kills" id="kills">Zombies slain: 0</div>
       <div class="crosshair"></div>
+      <div id="floaters"></div>
+      <div class="level-up" id="level-up">
+        <div class="level-up-title">Level Up</div>
+        <div class="level-up-detail" id="level-up-detail"></div>
+      </div>
       <div class="vignette" id="vignette"></div>
     </div>
 
-    <div id="overlay" class="overlay">
+    <!-- Title -->
+    <div id="title-screen" class="overlay screen">
       <div class="panel">
         <h1>EVIL ONE</h1>
-        <p class="subtitle">Milestone 1 · Combat prototype</p>
-        <button id="play-btn">Click to play</button>
-        <dl class="controls">
-          <dt>W A S D</dt><dd>Move</dd>
-          <dt>Mouse / trackpad</dt><dd>Look</dd>
-          <dt>Click or J</dt><dd>Attack (keep pressing for a 3-hit combo)</dd>
-          <dt>Q or K (hold)</dt><dd>Block</dd>
-          <dt>Space</dt><dd>Dodge roll</dd>
-          <dt>Shift</dt><dd>Sprint</dd>
-          <dt>Esc</dt><dd>Pause</dd>
-        </dl>
+        <p class="subtitle">Rise against Zomawi</p>
+        <button id="new-game-btn">New Game</button>
+      </div>
+    </div>
+
+    <!-- Name your hero -->
+    <div id="name-screen" class="overlay screen hidden">
+      <form class="panel" id="name-form" autocomplete="off">
+        <h2>Name your hero</h2>
+        <p class="subtitle">A soldier of the human army</p>
+        <div class="name-row">
+          <input id="name-input" maxlength="20" spellcheck="false" placeholder="Enter a name" />
+          <button type="button" id="random-name-btn" class="secondary" title="Pick a random name">Random</button>
+        </div>
+        <p class="error" id="name-error"></p>
+        <button type="submit" id="name-ok-btn">Continue</button>
+      </form>
+    </div>
+
+    <!-- Intro story -->
+    <div id="intro-screen" class="overlay screen hidden">
+      <div class="panel intro">
+        <div class="story" id="story"></div>
+        <dl class="controls" data-controls></dl>
+        <button id="begin-btn">Take up your sword</button>
+      </div>
+    </div>
+
+    <!-- Pause -->
+    <div id="pause-screen" class="overlay hidden">
+      <div class="panel">
+        <h2>Paused</h2>
+        <button id="resume-btn">Resume</button>
+        <dl class="controls" data-controls></dl>
         <label class="sens">Look sensitivity
           <input type="range" id="sens" min="0.2" max="3" step="0.1" value="1" />
           <output id="sens-value">1.0</output>
@@ -41,7 +75,8 @@
       </div>
     </div>
 
-    <div id="death" class="overlay hidden">
+    <!-- Death -->
+    <div id="death-screen" class="overlay hidden">
       <div class="panel">
         <h1 class="fallen">You have fallen</h1>
         <button id="respawn-btn">Rise again</button>

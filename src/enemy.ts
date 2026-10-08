@@ -4,6 +4,7 @@ import type { GameContext } from './types';
 import { heightAt, resolveColliders } from './world';
 import { dampAngle, easeOutCubic, lerp, smoothing, wrapAngle } from './util';
 import { sfx, volumeAt } from './audio';
+import { XP_REWARD } from './progression';
 
 type State = 'idle' | 'chase' | 'windup' | 'strike' | 'recover' | 'stagger' | 'dead';
 
@@ -31,6 +32,7 @@ export class Zombie {
   readonly pos = new THREE.Vector3();
   readonly vel = new THREE.Vector3();
   readonly radius = 0.42;
+  readonly xpReward = XP_REWARD.zombie;
   yaw = Math.random() * Math.PI * 2;
   maxHp = 100;
   hp = 100;
@@ -120,14 +122,14 @@ export class Zombie {
           target.set(wx / wd, 0, wz / wd).multiplyScalar(0.8);
           faceYaw = Math.atan2(wx, wz);
         }
-        if (player.alive && dist < SIGHT) {
+        if (!ctx.peaceful && player.alive && dist < SIGHT) {
           this.setState('chase');
           sfx.groan(volumeAt(dist));
         }
         break;
       }
       case 'chase':
-        if (!player.alive || dist > SIGHT * 1.6) {
+        if (ctx.peaceful || !player.alive || dist > SIGHT * 1.6) {
           this.setState('idle');
           break;
         }
@@ -199,6 +201,7 @@ export class Zombie {
     const at = new THREE.Vector3(this.pos.x, this.pos.y + 1.3, this.pos.z);
     ctx.particles.burst(at, 0x3f5a2a, heavy ? 14 : 8, 4.5, dir);
     sfx.hit(heavy);
+    ctx.floatText(at, String(damage), heavy ? 'heavy' : 'damage');
     if (this.hp <= 0) {
       this.setState('dead');
       ctx.particles.burst(at, 0x2d4020, 16, 5, dir);

@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173 and click **Click to play**.
+Then open http://localhost:5173 choose **New Game**, name your hero, and click **Take up your sword**.
 
 ## Controls
 
@@ -25,7 +25,7 @@ Then open http://localhost:5173 and click **Click to play**.
 
 ## Debugging
 
-Open http://localhost:5173/?test to play without pointer lock. In the browser console, `__game` exposes the player, enemies and camera. `__game.step(seconds)` advances the game at a fixed 60 fps, which also works while the tab is in the background.
+Open http://localhost:5173/?test to skip the menus and play without pointer lock. In the browser console, `__game` exposes the player, enemies and camera. `__game.step(seconds)` advances the game at a fixed 60 fps, which also works while the tab is in the background.
 
 ## Layout
 
@@ -39,5 +39,7 @@ Open http://localhost:5173/?test to play without pointer lock. In the browser co
 | `src/world.ts` | Terrain, trees, rocks, lighting, collisions |
 | `src/particles.ts` | Blood and spark particles |
 | `src/audio.ts` | Synthesized sound effects |
-| `src/hud.ts` | Health and stamina bars, pause and death screens |
+| `src/hud.ts` | Status bars, title, naming, intro, pause and death screens |
+| `src/progression.ts` | XP curve, level stat gains, XP rewards |
+| `src/floaters.ts` | Floating damage numbers and +XP text |
 | `src/input.ts` | Keyboard and pointer-lock mouse input |

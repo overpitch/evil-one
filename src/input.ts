@@ -20,6 +20,8 @@ export class Input {
 
   constructor(private readonly el: HTMLElement) {
     window.addEventListener('keydown', (e) => {
+      // Let text fields (hero name) receive every key.
+      if (e.target instanceof HTMLInputElement && e.target.type === 'text') return;
       if (GAME_KEYS.has(e.code)) e.preventDefault();
       if (!e.repeat) this.pressed.add(e.code);
       this.down.add(e.code);

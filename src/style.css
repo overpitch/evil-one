@@ -32,12 +32,30 @@ body {
   width: 280px;
 }
 
+.hero-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
 .hero-name {
+  max-width: 210px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: 18px;
   letter-spacing: 2px;
   text-transform: uppercase;
-  margin-bottom: 6px;
   text-shadow: 0 2px 4px #000;
+}
+
+.level-badge {
+  font-size: 13px;
+  padding: 1px 7px;
+  color: #1b1208;
+  background: #d9b24a;
+  border-radius: 3px;
 }
 
 .bar {
@@ -66,6 +84,22 @@ body {
 
 .bar.stamina .fill {
   background: linear-gradient(#e8d26a, #b39420);
+}
+
+.bar.xp {
+  height: 6px;
+  margin-bottom: 3px;
+  border-width: 1px;
+}
+
+.bar.xp .fill {
+  background: linear-gradient(#b68cff, #6b3fc4);
+}
+
+.xp-text {
+  font-size: 11px;
+  color: #c9b8ec;
+  text-shadow: 0 1px 2px #000;
 }
 
 .bar.stamina.low {
@@ -108,6 +142,72 @@ body {
   background: radial-gradient(ellipse at center, transparent 45%, rgba(170, 0, 0, 0.75) 100%);
 }
 
+#hud.hidden {
+  display: none;
+}
+
+/* Damage numbers and +XP */
+.floater {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-weight: bold;
+  white-space: nowrap;
+  text-shadow: 0 2px 3px #000, 0 0 2px #000;
+  will-change: transform, opacity;
+}
+
+.floater.damage {
+  font-size: 18px;
+  color: #fff;
+}
+
+.floater.heavy {
+  font-size: 26px;
+  color: #ffd36b;
+}
+
+.floater.xp {
+  font-size: 17px;
+  color: #c9a6ff;
+}
+
+.level-up {
+  position: absolute;
+  top: 18%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  opacity: 0;
+}
+
+.level-up.show {
+  animation: level-up 2.8s ease-out forwards;
+}
+
+.level-up-title {
+  font-size: 44px;
+  letter-spacing: 8px;
+  text-transform: uppercase;
+  color: #ffd36b;
+  text-shadow: 0 0 20px rgba(255, 190, 60, 0.7), 0 3px 0 #5a3a08;
+}
+
+.level-up-detail {
+  margin-top: 6px;
+  font-size: 16px;
+  color: #f2ead8;
+  text-shadow: 0 2px 3px #000;
+}
+
+@keyframes level-up {
+  0% { opacity: 0; transform: scale(0.6); }
+  10% { opacity: 1; transform: scale(1.08); }
+  18% { transform: scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-20px); }
+}
+
 /* ---------- Overlays ---------- */
 
 .overlay {
@@ -137,6 +237,94 @@ h1 {
   letter-spacing: 10px;
   color: #c9242a;
   text-shadow: 0 0 24px rgba(201, 36, 42, 0.5), 0 4px 0 #3a0608;
+}
+
+h2 {
+  margin: 0;
+  font-size: 36px;
+  letter-spacing: 4px;
+  color: #e9dcc0;
+  text-shadow: 0 3px 0 #000;
+}
+
+/* Menu screens show the world behind them, so dim less. */
+.overlay.screen {
+  background: radial-gradient(ellipse at center, rgba(8, 6, 10, 0.35), rgba(8, 6, 10, 0.85));
+  cursor: default;
+}
+
+.name-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+#name-input {
+  font: inherit;
+  font-size: 22px;
+  width: 280px;
+  padding: 10px 14px;
+  color: #f2ead8;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid #8a7a5a;
+  border-radius: 4px;
+  outline: none;
+  user-select: text;
+}
+
+#name-input:focus {
+  border-color: #d9b24a;
+}
+
+button.secondary {
+  font-size: 16px;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.5);
+  border-color: #8a7a5a;
+}
+
+button.secondary:hover {
+  background: rgba(40, 30, 20, 0.7);
+}
+
+.error {
+  min-height: 1.4em;
+  margin: 10px 0 14px;
+  font-size: 14px;
+  color: #ff7b6b;
+}
+
+.panel.intro {
+  max-width: 640px;
+}
+
+.story p {
+  margin: 0 0 14px;
+  font-size: 19px;
+  line-height: 1.5;
+  color: #e9dcc0;
+  text-shadow: 0 2px 4px #000;
+  opacity: 0;
+  animation: fade-in 1s ease-out forwards;
+}
+
+.story .hero {
+  color: #ffd36b;
+}
+
+.story .villain {
+  color: #e2504a;
+}
+
+#intro-screen .controls,
+#begin-btn {
+  opacity: 0;
+  animation: fade-in 0.8s ease-out forwards;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }
 
 h1.fallen {
