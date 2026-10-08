@@ -553,6 +553,61 @@ button:hover {
   text-align: left;
 }
 
+.difficulty-option {
+  grid-template-columns: 180px 1fr;
+  row-gap: 6px;
+}
+
+.option-note {
+  grid-column: 2;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #b8ad96;
+}
+
+/* Three-way switch */
+.segmented {
+  display: inline-flex;
+  justify-self: start;
+  border: 2px solid #8a7a5a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.segmented label {
+  position: relative;
+  cursor: pointer;
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented span {
+  display: block;
+  padding: 6px 16px;
+  font-size: 15px;
+  color: #d8cfbc;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.segmented label + label span {
+  border-left: 1px solid #8a7a5a;
+}
+
+.segmented input:checked + span {
+  color: #f2ead8;
+  background: #7d1418;
+}
+
+.segmented input:focus-visible + span {
+  outline: 2px solid #d9b24a;
+  outline-offset: -2px;
+}
+
 .option output {
   color: #b8ad96;
 }

@@ -56,6 +56,8 @@ export interface CampaignEvents {
   /** Heal, reinforce the squad and save. */
   checkpointReached(cp: Checkpoint): void;
   awardXp(amount: number, at: THREE.Vector3): void;
+  /** The hero crossed into an enemy land: fresh soldiers join. */
+  enteredTerritory(t: Territory): void;
   bossStarted(name: string): void;
   bossEnded(): void;
   save(): void;
@@ -73,6 +75,8 @@ export class Campaign {
 
   private readonly camp: Checkpoint;
   private touching: string | null = null;
+  /** The enemy land the hero is in (null when outside them all). */
+  private inLand: TerritoryId | null = null;
   private time = 0;
   private readonly centers = new Map<TerritoryId, THREE.Vector3>();
 
@@ -188,8 +192,10 @@ export class Campaign {
     }
 
     this.current = this.checkpoints.find((c) => c.id === save?.checkpoint && c.unlocked) ?? this.camp;
-    // The hero respawns beside this banner; don't re-trigger it immediately.
+    // The hero respawns beside this banner; don't re-trigger it (or a land's welcome) immediately.
     this.touching = this.current.id;
+    const b = this.current.banner;
+    this.inLand = this.territories.find((t) => territoryWeight(t.def, b.x, b.z) > 0.5)?.def.id ?? null;
   }
 
   /** What the save file needs from the campaign. */
@@ -222,6 +228,14 @@ export class Campaign {
     for (const t of this.territories) {
       for (const o of t.outposts) {
         if (!o.captured && o.group.cleared) this.capture(o);
+      }
+      // Crossing into this land from outside brings fresh soldiers.
+      const w = territoryWeight(t.def, player.pos.x, player.pos.z);
+      if (player.alive && w > 0.5 && this.inLand !== t.def.id && !this.activeFight) {
+        this.inLand = t.def.id;
+        this.events.enteredTerritory(t);
+      } else if (this.inLand === t.def.id && w < 0.2) {
+        this.inLand = null;
       }
       if (!this.isLiberated(t)) this.updatePatrol(t, dt);
 

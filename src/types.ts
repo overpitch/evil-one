@@ -6,6 +6,7 @@ import type { Particles } from './particles';
 import type { FloaterKind } from './floaters';
 import type { Colliders } from './world';
 import type { Projectiles } from './projectiles';
+import type { DifficultyProfile } from './settings';
 
 export type HitResult = 'ignored' | 'blocked' | 'hit';
 
@@ -27,6 +28,8 @@ export interface GameContext {
   enemies: Enemy[];
   particles: Particles;
   projectiles: Projectiles;
+  /** Current difficulty (from Options); can change mid-game. */
+  difficulty: DifficultyProfile;
   /** True behind the menus: enemies wander and ignore the humans. */
   peaceful: boolean;
   /** During a leader fight, only that leader's side may attack anyone inside the arena. */

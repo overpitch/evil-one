@@ -26,7 +26,15 @@ Then go to http://localhost:5173, choose **New Game**, name your hero, and click
 
 ## Options
 
-**Options** (on the title screen and the pause screen) has look sensitivity and **Invert vertical look**. Options are saved in the browser, so each player keeps their own on their own device.
+**Options** (on the title screen and the pause screen) has:
+
+- **Difficulty:** Easy, Normal or Hard. It changes how hard enemies hit, how many hits they take, and how fast you and your soldiers heal between fights. You can switch at any time, even mid-fight.
+- **Look sensitivity.**
+- **Invert vertical look.**
+
+Options are saved in the browser, so each player keeps their own on their own device.
+
+Your squad heals between fights. When you enter an enemy land, fallen soldiers are replaced and the rest are healed to full.
 
 ## Saving
 

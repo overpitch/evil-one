@@ -42,6 +42,7 @@ export class Ally implements Target {
   private recoverTime = RECOVER;
   private walkPhase = Math.random() * 10;
   private hurtFlash = 0;
+  private sinceHurt = 99;
   private readonly desired = new THREE.Vector3();
 
   constructor(scene: THREE.Scene, private readonly slot: number) {
@@ -64,12 +65,18 @@ export class Ally implements Target {
   }
 
   /** Brings the soldier (back) into the fight at full health. */
+  /** Patches a living soldier back up to full health. */
+  heal() {
+    if (this.alive) this.hp = MAX_HP;
+  }
+
   reinforce(x: number, z: number) {
     this.pos.set(x, heightAt(x, z), z);
     this.vel.set(0, 0, 0);
     this.hp = MAX_HP;
     this.target = null;
     this.hurtFlash = 0;
+    this.sinceHurt = 99;
     this.h.root.visible = true;
     this.setState('follow');
   }
@@ -180,6 +187,9 @@ export class Ally implements Target {
     resolveColliders(this.pos, this.radius, ctx.colliders);
     this.pos.y = heightAt(this.pos.x, this.pos.z);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 3);
+    // Soldiers patch themselves up between fights, like the hero.
+    this.sinceHurt += dt;
+    if (this.alive && this.sinceHurt > ctx.difficulty.regenDelay) this.hp = Math.min(MAX_HP, this.hp + ctx.difficulty.regenRate * dt);
     this.animate(dt);
   }
 
@@ -196,7 +206,8 @@ export class Ally implements Target {
       return 'blocked';
     }
     // Soldiers can't dodge, so area attacks (meteors, shockwaves) hurt them less.
-    this.hp -= unblockable ? amount * 0.5 : amount;
+    this.hp -= (unblockable ? amount * 0.5 : amount) * ctx.difficulty.enemyDamage;
+    this.sinceHurt = 0;
     this.hurtFlash = 1;
     this.vel.set(-dx / d, 0, -dz / d).multiplyScalar(4);
     ctx.particles.burst(new THREE.Vector3(this.pos.x, this.pos.y + 1.2, this.pos.z), 0x8a0f0f, 6, 3);

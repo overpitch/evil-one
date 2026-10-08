@@ -13,7 +13,7 @@ import { Projectiles } from './projectiles';
 import { initAudio, sfx } from './audio';
 import { Campaign, type Objective } from './campaign';
 import { CAMP_BANNER } from './layout';
-import { loadSettings, saveSettings, type Settings } from './settings';
+import { DIFFICULTIES, loadSettings, saveSettings, type Settings } from './settings';
 import { loadSave, newSave, useTestSaveSlot, writeSave, type SaveData } from './save';
 import type { MapData } from './map';
 import type { GameContext } from './types';
@@ -69,6 +69,7 @@ const ctx: GameContext = {
   enemies,
   particles,
   projectiles,
+  difficulty: DIFFICULTIES[settings.difficulty],
   peaceful: true,
   arenaLock: null,
   floatText: (at, text, kind) => floaters.spawn(at, text, kind),
@@ -93,6 +94,12 @@ const campaign = new Campaign(scene, world, enemies, {
     player.stamina = player.maxStamina;
     reinforceSquad();
     saveGame();
+  },
+  enteredTerritory: (t) => {
+    reinforceSquad();
+    for (const a of allies) a.heal();
+    const status = campaign.isLiberated(t) ? 'Liberated' : `Recommended level ${t.def.recommendedLevel}`;
+    hud.announce(t.def.name, `${status} · Reinforcements have joined you`);
   },
   awardXp: (amount, at) => {
     floaters.spawn(at, `+${amount} XP`, 'xp');
@@ -262,6 +269,7 @@ hud.onRespawn = () => {
 };
 hud.onSettings = (s) => {
   applySettings(s);
+  ctx.difficulty = DIFFICULTIES[s.difficulty];
   saveSettings(s);
 };
 input.onLockChange = (locked) => {

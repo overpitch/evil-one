@@ -92,6 +92,15 @@
         <h2>Options</h2>
         <p class="subtitle">Saved for whoever plays in this browser</p>
         <div class="options">
+          <div class="option difficulty-option">
+            <span id="difficulty-label">Difficulty</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="difficulty-label">
+              <label><input type="radio" name="difficulty" value="easy" /><span>Easy</span></label>
+              <label><input type="radio" name="difficulty" value="normal" /><span>Normal</span></label>
+              <label><input type="radio" name="difficulty" value="hard" /><span>Hard</span></label>
+            </div>
+            <p class="option-note" id="difficulty-note"></p>
+          </div>
           <label class="option">
             <span>Look sensitivity</span>
             <input type="range" id="sens" min="0.2" max="3" step="0.1" value="1" />

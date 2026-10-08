@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Player } from './player';
 import { PER_LEVEL } from './progression';
-import type { Settings } from './settings';
+import { DIFFICULTIES, type Difficulty, type Settings } from './settings';
 import type { SaveData } from './save';
 import { drawMap, type MapData } from './map';
 
@@ -168,7 +168,11 @@ export class Hud {
     const sensValue = $<HTMLOutputElement>('sens-value');
     const invert = $<HTMLInputElement>('invert-y');
     const invertValue = $<HTMLOutputElement>('invert-value');
+    const difficultyRadios = [...document.querySelectorAll<HTMLInputElement>('input[name="difficulty"]')];
+    const difficultyNote = $('difficulty-note');
     const render = () => {
+      for (const r of difficultyRadios) r.checked = r.value === this.settings.difficulty;
+      difficultyNote.textContent = DIFFICULTIES[this.settings.difficulty].description;
       sens.value = String(this.settings.sensitivity);
       sensValue.value = this.settings.sensitivity.toFixed(1);
       invert.checked = this.settings.invertY;
@@ -184,6 +188,13 @@ export class Hud {
       render();
       this.onSettings?.({ ...this.settings });
     });
+    for (const r of difficultyRadios) {
+      r.addEventListener('change', () => {
+        this.settings.difficulty = r.value as Difficulty;
+        render();
+        this.onSettings?.({ ...this.settings });
+      });
+    }
     render();
     $('options-back-btn').addEventListener('click', () => {
       if (this.optionsReturn === 'pause') {

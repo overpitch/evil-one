@@ -14,7 +14,7 @@ const KING_ARENA = ZOMBIE_LAND.arena;
 const KING_STATS: EnemyStats = {
   hp: 1400,
   speed: 2.6,
-  damage: 22,
+  damage: 18,
   knockback: 8,
   scale: 1.7,
   poise: 220,
@@ -183,7 +183,7 @@ export class ZombieKing extends Zombie {
       this.faceYaw = Math.atan2(dx, dz);
       if (!this.summoned && this.stateTime > 0.6) {
         this.summoned = true;
-        ctx.summonMinions(this, this.enraged ? 4 : 3);
+        ctx.summonMinions(this, this.enraged ? 3 : 2);
         ctx.addShake(0.5);
       }
       if (this.stateTime >= ROAR_TIME) this.setState('chase');

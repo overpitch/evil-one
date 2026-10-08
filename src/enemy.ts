@@ -418,7 +418,7 @@ export abstract class Enemy {
       ctx.particles.burst(new THREE.Vector3(this.pos.x - dir.x * 0.6, this.pos.y + 1.4 * this.stats.scale, this.pos.z - dir.z * 0.6), 0xffd36b, 10, 4);
       return 'parried';
     }
-    damage = Math.round(damage * this.damageTakenMultiplier());
+    damage = Math.max(1, Math.round((damage * this.damageTakenMultiplier()) / ctx.difficulty.enemyHealth));
     const byPlayer = attacker === ctx.player;
     this.hp = Math.max(0, this.hp - damage);
     this.hitFlash = 1;

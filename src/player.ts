@@ -264,7 +264,8 @@ export class Player implements Target {
     if (this.staminaDelay > 0) this.staminaDelay -= dt;
     else this.stamina = Math.min(this.maxStamina, this.stamina + (this.blocking ? 12 : 32) * dt);
     // Slow health regen once out of combat for a while.
-    if (this.alive && this.sinceHurt > 6) this.hp = Math.min(this.maxHp, this.hp + 4 * dt);
+    const { regenDelay, regenRate } = ctx.difficulty;
+    if (this.alive && this.sinceHurt > regenDelay) this.hp = Math.min(this.maxHp, this.hp + regenRate * dt);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.5);
     this.slowTimer = Math.max(0, this.slowTimer - dt);
 
@@ -274,6 +275,7 @@ export class Player implements Target {
   /** Returns what happened so attackers can react (a blocked attacker staggers). */
   takeDamage(amount: number, from: THREE.Vector3, ctx: GameContext, unblockable = false): HitResult {
     if (!this.alive || this.invulnerable) return 'ignored';
+    amount *= ctx.difficulty.enemyDamage;
     const dx = from.x - this.pos.x;
     const dz = from.z - this.pos.z;
     const away = new THREE.Vector3(-dx, 0, -dz).normalize();
