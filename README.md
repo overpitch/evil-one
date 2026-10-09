@@ -2,7 +2,15 @@
 
 A low-poly, third-person sword-fighting game that runs in the browser. See [GAME_DESIGN.md](GAME_DESIGN.md) for the full design.
 
-## Run it
+## Play online
+
+**https://overpitch.github.io/evil-one/**
+
+It works in Chrome, Edge and Safari on computers and Chromebooks, and in Microsoft Edge on Xbox with a controller. Each device keeps its own saved game. On a slower computer, set **Graphics: Low** in Options.
+
+Every push to `main` rebuilds and republishes the game automatically (see `.github/workflows/deploy.yml`).
+
+## Run it locally
 
 ```bash
 npm install
@@ -24,10 +32,24 @@ Then go to http://localhost:5173, choose **New Game**, name your hero, and click
 | Map | `M` |
 | Pause | `Esc` |
 
+**Controller (Xbox layout):**
+
+| Action | Button |
+|---|---|
+| Move / look | Left stick / right stick |
+| Attack | RT or X |
+| Block (hold) | LT or LB |
+| Dodge roll | A |
+| Sprint (hold) | B or click the left stick |
+| Map | View |
+| Pause | Menu |
+| Menus | D-pad or left stick to choose, A to select, B to go back |
+
 ## Options
 
 **Options** (on the title screen and the pause screen) has:
 
+- **Graphics:** High, or Low for slower computers and Chromebooks (no shadows, lower resolution).
 - **Difficulty:** Easy, Normal or Hard. It changes how hard enemies hit, how many hits they take, and how fast you and your soldiers heal between fights. You can switch at any time, even mid-fight.
 - **Look sensitivity.**
 - **Invert vertical look.**
@@ -84,4 +106,5 @@ Open http://localhost:5173/?test to skip the menus and play without pointer lock
 | `src/floaters.ts` | Floating damage numbers and +XP text |
 | `src/settings.ts` | Player options (sensitivity, invert look) |
 | `src/save.ts` | Save game |
-| `src/input.ts` | Keyboard and pointer-lock mouse input |
+| `src/input.ts` | Keyboard, pointer-lock mouse and gamepad input |
+| `src/menuNav.ts` | Driving the menus with a controller |

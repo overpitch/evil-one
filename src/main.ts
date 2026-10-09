@@ -12,6 +12,7 @@ import { Floaters } from './floaters';
 import { Projectiles } from './projectiles';
 import { initAudio, musicOutput, setVolumes, sfx } from './audio';
 import { Music, type Mood, type Theme } from './music';
+import { MenuNavigator } from './menuNav';
 import { Campaign, type Objective } from './campaign';
 import { CAMP_BANNER } from './layout';
 import { DIFFICULTIES, loadSettings, saveSettings, type Settings } from './settings';
@@ -51,9 +52,15 @@ function applySettings(s: Settings) {
   camCtrl.sensitivity = s.sensitivity;
   camCtrl.invertY = s.invertY;
   setVolumes(s.musicVolume, s.sfxVolume);
+  // Low graphics: no real-time shadows and fewer pixels, for slower computers.
+  renderer.setPixelRatio(s.graphics === 'low' ? Math.min(window.devicePixelRatio, 1) : Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  world.setShadows(s.graphics === 'high');
 }
 applySettings(settings);
 player.onStep = (volume) => sfx.step(volume);
+player.onHurt = () => input.rumble(0.7, 180);
+const menuNav = new MenuNavigator();
 // Browsers only allow sound after the player interacts; start it on the first key or click.
 for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, () => initAudio(), { once: true });
 
@@ -85,6 +92,7 @@ const ctx: GameContext = {
   floatText: (at, text, kind) => floaters.spawn(at, text, kind),
   addShake: (amount) => camCtrl.addShake(amount),
   hitStop: (seconds) => {
+    input.rumble(seconds > 0.08 ? 0.5 : 0.3, 90);
     hitStopTimer = Math.max(hitStopTimer, seconds);
   },
   onEnemyKilled: (z) => {
@@ -250,8 +258,13 @@ function mapData(objective: Objective): MapData {
 /** Grabs the pointer. If the browser refuses, the pause screen offers a Resume button. */
 function lockPointer() {
   initAudio();
-  if (testMode) return;
   (document.activeElement as HTMLElement | null)?.blur();
+  if (testMode) return;
+  // A controller doesn't need the mouse captured: just close the menu.
+  if (input.mode === 'gamepad') {
+    hud.showPause(false);
+    return;
+  }
   input.requestLock();
   setTimeout(() => {
     if (phase === 'playing' && !input.locked && player.alive && !hud.optionsOpen) hud.showPause(true);
@@ -403,15 +416,24 @@ function updateSound(dt: number) {
 
 /** Advances the game by one frame of `realDt` seconds. */
 function tick(realDt: number) {
+  input.poll(realDt);
+  // Menu button closes the pause menu; the menus themselves are driven by the d-pad, A and B.
+  const resumed = input.mode === 'gamepad' && input.pausePressed && hud.pauseOpen;
+  if (resumed) hud.showPause(false);
+  menuNav.update(input);
+
   if (phase === 'menu') {
     player.idle(realDt);
     for (const a of allies) a.update(realDt, ctx);
     updateMenuCamera(realDt);
   } else {
-    if ((input.locked || testMode) && !endingShown) {
+    // With a controller there's no mouse capture: play whenever no menu is open.
+    const padPlay = input.mode === 'gamepad' && !menuNav.menuOpen;
+    if (padPlay && input.pausePressed && !resumed) hud.showPause(true);
+    if ((input.locked || padPlay || testMode) && !endingShown) {
       playTime += realDt;
-      if (input.wasPressed('KeyM')) hud.showMap(!hud.mapOpen);
-      camCtrl.applyInput(input);
+      if (input.mapPressed) hud.showMap(!hud.mapOpen);
+      camCtrl.applyInput(input, realDt);
       let dt = realDt;
       // Hit-stop: freeze the action for a few frames when a blow lands.
       if (hitStopTimer > 0) {

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Player } from './player';
 import { PER_LEVEL } from './progression';
-import { DIFFICULTIES, type Difficulty, type Settings } from './settings';
+import { DIFFICULTIES, type Difficulty, type Graphics, type Settings } from './settings';
 import type { SaveData } from './save';
 import { drawMap, type MapData } from './map';
 import { sfx } from './audio';
@@ -150,6 +150,11 @@ export class Hud {
         dd.textContent = action;
         dl.append(dt, dd);
       }
+      const pad = document.createElement('p');
+      pad.className = 'pad-controls';
+      pad.textContent =
+        'Controller: left stick move · right stick look · RT or X attack · LT or LB block · A roll · B sprint · View map · Menu pause';
+      dl.after(pad);
     }
 
     // Title
@@ -219,6 +224,7 @@ export class Hud {
     const invert = $<HTMLInputElement>('invert-y');
     const invertValue = $<HTMLOutputElement>('invert-value');
     const difficultyRadios = [...document.querySelectorAll<HTMLInputElement>('input[name="difficulty"]')];
+    const graphicsRadios = [...document.querySelectorAll<HTMLInputElement>('input[name="graphics"]')];
     const difficultyNote = $('difficulty-note');
     const volumeSliders: [HTMLInputElement, HTMLOutputElement, 'musicVolume' | 'sfxVolume'][] = [
       [$<HTMLInputElement>('music-volume'), $<HTMLOutputElement>('music-volume-value'), 'musicVolume'],
@@ -230,6 +236,7 @@ export class Hud {
         out.value = `${Math.round(this.settings[key] * 100)}%`;
       }
       for (const r of difficultyRadios) r.checked = r.value === this.settings.difficulty;
+      for (const r of graphicsRadios) r.checked = r.value === this.settings.graphics;
       difficultyNote.textContent = DIFFICULTIES[this.settings.difficulty].description;
       sens.value = String(this.settings.sensitivity);
       sensValue.value = this.settings.sensitivity.toFixed(1);
@@ -249,6 +256,13 @@ export class Hud {
     for (const [slider, , key] of volumeSliders) {
       slider.addEventListener('input', () => {
         this.settings[key] = Number(slider.value);
+        render();
+        this.onSettings?.({ ...this.settings });
+      });
+    }
+    for (const r of graphicsRadios) {
+      r.addEventListener('change', () => {
+        this.settings.graphics = r.value as Graphics;
         render();
         this.onSettings?.({ ...this.settings });
       });
@@ -309,6 +323,10 @@ export class Hud {
     this.optionsReturn = from;
     this.showPause(false);
     this.showScreen('options');
+  }
+
+  get pauseOpen() {
+    return !this.pause.classList.contains('hidden');
   }
 
   get optionsOpen() {

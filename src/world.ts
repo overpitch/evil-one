@@ -219,6 +219,10 @@ export function createWorld(scene: THREE.Scene) {
     gates,
     /** The dome of red light over Zomawi's arena while the fortress is sealed. */
     seal,
+    /** Real-time shadows on or off (Graphics: Low turns them off). */
+    setShadows(on: boolean) {
+      sun.castShadow = on;
+    },
     /**
      * Follows the player with the sun's shadow camera and blends the sky,
      * fog and light toward each enemy land's mood.

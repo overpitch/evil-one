@@ -515,6 +515,21 @@ h1.victory {
   color: rgba(216, 207, 188, 0.55);
 }
 
+/* Controller focus highlight */
+.pad-focus {
+  outline: 3px solid #ffd36b !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 16px rgba(255, 211, 107, 0.5);
+}
+
+.pad-controls {
+  max-width: 460px;
+  margin: -8px auto 20px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #b8ad96;
+}
+
 .tip {
   max-width: 420px;
   margin: 0 auto 24px;

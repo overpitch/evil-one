@@ -95,6 +95,8 @@ export class Player implements Target {
   private lastStep = 0;
   /** Called on each footfall with a volume (0..1). */
   onStep?: (volume: number) => void;
+  /** Called when the hero is hurt (controller rumble). */
+  onHurt?: (amount: number) => void;
   // Presses are remembered briefly so a click during a stagger or swing isn't lost.
   private attackBuffer = 0;
   private rollBuffer = 0;
@@ -176,15 +178,14 @@ export class Player implements Target {
     this.stateTime += dt;
     this.sinceHurt += dt;
     this.attackBuffer = input.attackPressed ? 0.25 : Math.max(0, this.attackBuffer - dt);
-    this.rollBuffer = input.wasPressed('Space') ? 0.2 : Math.max(0, this.rollBuffer - dt);
+    this.rollBuffer = input.rollPressed ? 0.2 : Math.max(0, this.rollBuffer - dt);
 
     // Movement is relative to where the camera looks (FPS-style strafing).
     const fx = Math.sin(camYaw);
     const fz = Math.cos(camYaw);
-    const ix = (input.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (input.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
-    const iz = (input.isDown('KeyW', 'ArrowUp') ? 1 : 0) - (input.isDown('KeyS', 'ArrowDown') ? 1 : 0);
+    // Keys or the left stick; a partly tilted stick walks slower.
+    const { x: ix, z: iz } = input.moveVector();
     const wish = this.wish.set(fx * iz - fz * ix, 0, fz * iz + fx * ix);
-    if (wish.lengthSq() > 0) wish.normalize();
     const forward = this.tmp.set(fx, 0, fz);
 
     const target = this.target.set(0, 0, 0);
@@ -194,8 +195,8 @@ export class Player implements Target {
 
     switch (this.state) {
       case 'move': {
-        this.blocking = input.isDown('KeyQ', 'KeyK');
-        this.sprinting = !this.blocking && iz > 0 && this.stamina > 1 && input.isDown('ShiftLeft', 'ShiftRight');
+        this.blocking = input.blockHeld;
+        this.sprinting = !this.blocking && iz > 0.3 && this.stamina > 1 && input.sprintHeld;
         if (this.sprinting) {
           this.stamina = Math.max(0, this.stamina - 22 * dt);
           this.staminaDelay = 0.5;
@@ -304,6 +305,7 @@ export class Player implements Target {
     this.hp = Math.max(0, this.hp - amount);
     this.sinceHurt = 0;
     this.hurtFlash = 1;
+    this.onHurt?.(amount);
     ctx.addShake(0.45);
     ctx.particles.burst(this.tmp.set(this.pos.x, this.pos.y + 1.2, this.pos.z), 0x8a0f0f, 8, 3);
     sfx.hurt();

@@ -3,6 +3,7 @@
  * device keeps their own choices.
  */
 export type Difficulty = 'easy' | 'normal' | 'hard';
+export type Graphics = 'high' | 'low';
 
 export interface Settings {
   /** Look speed multiplier for mouse and trackpad. */
@@ -14,6 +15,8 @@ export interface Settings {
   musicVolume: number;
   /** 0..1 */
   sfxVolume: number;
+  /** 'low' turns off shadows and renders at a lower resolution, for slower computers. */
+  graphics: Graphics;
 }
 
 export interface DifficultyProfile {
@@ -59,7 +62,7 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyProfile> = {
 const KEY = 'evil-one.settings';
 const LEGACY_SENSITIVITY_KEY = 'evil-one.sensitivity';
 
-export const DEFAULT_SETTINGS: Settings = { sensitivity: 1, invertY: false, difficulty: 'normal', musicVolume: 0.6, sfxVolume: 0.8 };
+export const DEFAULT_SETTINGS: Settings = { sensitivity: 1, invertY: false, difficulty: 'normal', musicVolume: 0.6, sfxVolume: 0.8, graphics: 'high' };
 
 export function loadSettings(): Settings {
   const settings = { ...DEFAULT_SETTINGS };
@@ -70,6 +73,7 @@ export function loadSettings(): Settings {
       if (typeof parsed.sensitivity === 'number' && parsed.sensitivity > 0) settings.sensitivity = parsed.sensitivity;
       if (typeof parsed.invertY === 'boolean') settings.invertY = parsed.invertY;
       if (parsed.difficulty && parsed.difficulty in DIFFICULTIES) settings.difficulty = parsed.difficulty;
+      if (parsed.graphics === 'high' || parsed.graphics === 'low') settings.graphics = parsed.graphics;
       for (const key of ['musicVolume', 'sfxVolume'] as const) {
         const v = parsed[key];
         if (typeof v === 'number' && v >= 0 && v <= 1) settings[key] = v;

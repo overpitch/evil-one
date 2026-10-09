@@ -34,10 +34,14 @@ export class ThirdPersonCamera {
     this.trauma = Math.min(1, this.trauma + amount);
   }
 
-  applyInput(input: Input) {
+  applyInput(input: Input, dt: number) {
     const s = BASE_SENSITIVITY * this.sensitivity;
-    this.yaw -= input.mouseDX * s;
-    this.pitch = clamp(this.pitch + input.mouseDY * s * (this.invertY ? -1 : 1), -0.55, 0.9);
+    const stick = input.lookStick();
+    // Right stick: up to ~150 degrees/second sideways at full tilt.
+    const dx = input.mouseDX * s + stick.x * 2.6 * this.sensitivity * dt;
+    const dy = input.mouseDY * s + stick.y * 1.8 * this.sensitivity * dt;
+    this.yaw -= dx;
+    this.pitch = clamp(this.pitch + dy * (this.invertY ? -1 : 1), -0.55, 0.9);
   }
 
   /** Snaps instead of easing on the next update (respawn, teleport). */
