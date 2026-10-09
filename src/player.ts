@@ -92,6 +92,9 @@ export class Player implements Target {
   private staggerDuration = 0;
   private sprinting = false;
   private walkPhase = 0;
+  private lastStep = 0;
+  /** Called on each footfall with a volume (0..1). */
+  onStep?: (volume: number) => void;
   // Presses are remembered briefly so a click during a stagger or swing isn't lost.
   private attackBuffer = 0;
   private rollBuffer = 0;
@@ -413,6 +416,11 @@ export class Player implements Target {
     this.walkPhase += dt * speed * 2.1 * (forwardSpeed < -0.3 ? -1 : 1);
     const amp = Math.min(speed / 5, 1.3);
     const step = Math.sin(this.walkPhase) * 0.75 * amp;
+    const footfall = Math.floor(this.walkPhase / Math.PI);
+    if (footfall !== this.lastStep) {
+      this.lastStep = footfall;
+      if (speed > 1.5 && (this.state === 'move' || this.state === 'attack')) this.onStep?.(Math.min(speed / 7, 1));
+    }
     h.hips.position.y = HIPS_HEIGHT + Math.abs(Math.cos(this.walkPhase)) * 0.05 * amp;
     h.legL.rotation.x = step;
     h.legR.rotation.x = -step;

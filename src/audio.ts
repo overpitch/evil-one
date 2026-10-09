@@ -2,17 +2,30 @@
  * Sound effects synthesized with the Web Audio API, so there are no audio
  * files to download. The context starts on the first click (browsers block
  * audio before a user gesture).
+ *
+ * Routing: effects → sfx bus ┐
+ *          music   → music bus ┴→ compressor → master → speakers
  */
 let ac: AudioContext | null = null;
-let master: GainNode | null = null;
+let sfxBus: GainNode | null = null;
+let musicBus: GainNode | null = null;
 let noise: AudioBuffer | null = null;
+const volumes = { music: 0.6, sfx: 0.8 };
 
 export function initAudio() {
   if (!ac) {
     ac = new AudioContext();
-    master = ac.createGain();
-    master.gain.value = 0.55;
-    master.connect(ac.destination);
+    const master = ac.createGain();
+    master.gain.value = 0.7;
+    const limiter = ac.createDynamicsCompressor();
+    limiter.threshold.value = -10;
+    limiter.ratio.value = 6;
+    limiter.connect(master).connect(ac.destination);
+    sfxBus = ac.createGain();
+    musicBus = ac.createGain();
+    sfxBus.connect(limiter);
+    musicBus.connect(limiter);
+    applyVolumes();
     noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
     const data = noise.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -20,21 +33,41 @@ export function initAudio() {
   if (ac.state === 'suspended') void ac.resume();
 }
 
+/** Music and effects volume, 0..1 each (from Options). */
+export function setVolumes(music: number, effects: number) {
+  volumes.music = music;
+  volumes.sfx = effects;
+  applyVolumes();
+}
+
+function applyVolumes() {
+  if (!ac || !sfxBus || !musicBus) return;
+  // Squared for a more natural-feeling slider.
+  sfxBus.gain.setTargetAtTime(0.8 * volumes.sfx ** 2, ac.currentTime, 0.05);
+  musicBus.gain.setTargetAtTime(0.55 * volumes.music ** 2, ac.currentTime, 0.05);
+}
+
 function ready() {
   return ac && ac.state === 'running' ? ac : null;
 }
 
-/** A gain node with a quick attack and exponential decay, wired to the master bus. */
-function envelope(a: AudioContext, t: number, peak: number, attack: number, decay: number) {
+/** For the music player: the running context and its bus, once audio has started. */
+export function musicOutput() {
+  const a = ready();
+  return a && musicBus ? { ac: a, bus: musicBus } : null;
+}
+
+/** A gain node with a quick attack and exponential decay, wired to `dest` (the effects bus by default). */
+export function envelope(a: AudioContext, t: number, peak: number, attack: number, decay: number, dest: AudioNode = sfxBus!) {
   const g = a.createGain();
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(peak, t + attack);
+  g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t + attack);
   g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
-  g.connect(master!);
+  g.connect(dest);
   return g;
 }
 
-function noiseSource(a: AudioContext, t: number, dur: number) {
+export function noiseSource(a: AudioContext, t: number, dur: number) {
   const src = a.createBufferSource();
   src.buffer = noise;
   src.loop = true;
@@ -43,7 +76,7 @@ function noiseSource(a: AudioContext, t: number, dur: number) {
   return src;
 }
 
-function tone(a: AudioContext, type: OscillatorType, from: number, to: number, t: number, dur: number) {
+export function tone(a: AudioContext, type: OscillatorType, from: number, to: number, t: number, dur: number) {
   const o = a.createOscillator();
   o.type = type;
   o.frequency.setValueAtTime(from, t);
@@ -53,7 +86,7 @@ function tone(a: AudioContext, type: OscillatorType, from: number, to: number, t
   return o;
 }
 
-function filter(a: AudioContext, type: BiquadFilterType, freq: number, q = 1) {
+export function filter(a: AudioContext, type: BiquadFilterType, freq: number, q = 1) {
   const f = a.createBiquadFilter();
   f.type = type;
   f.frequency.value = freq;
@@ -216,6 +249,58 @@ export const sfx = {
     depth.gain.value = 0.5;
     lfo.connect(depth).connect(flutter.gain);
     noiseSource(a, t, 1.4).connect(filter(a, 'bandpass', 900, 1.5)).connect(flutter).connect(envelope(a, t, 0.35 * vol, 0.1, 1.2));
+  },
+
+  /** A soft footfall. */
+  step(vol = 1) {
+    const a = ready();
+    if (!a || vol < 0.03) return;
+    const t = a.currentTime;
+    noiseSource(a, t, 0.08).connect(filter(a, 'lowpass', 500 + Math.random() * 300)).connect(envelope(a, t, 0.18 * vol, 0.004, 0.07));
+  },
+
+  /** Menu button click. */
+  click() {
+    const a = ready();
+    if (!a) return;
+    const t = a.currentTime;
+    tone(a, 'triangle', 900, 600, t, 0.06).connect(envelope(a, t, 0.12, 0.002, 0.06));
+  },
+
+  /** A war horn: the enemy counterattacks. */
+  warHorn() {
+    const a = ready();
+    if (!a) return;
+    const t = a.currentTime;
+    for (const detune of [0, 4]) {
+      const o = tone(a, 'sawtooth', 98 + detune, 98 + detune, t, 1.6);
+      o.frequency.setValueAtTime(82 + detune, t);
+      o.frequency.linearRampToValueAtTime(98 + detune, t + 0.25);
+      o.frequency.setValueAtTime(98 + detune, t + 1.2);
+      o.frequency.linearRampToValueAtTime(92 + detune, t + 1.6);
+      o.connect(filter(a, 'lowpass', 700, 2)).connect(envelope(a, t, 0.28, 0.2, 1.4));
+    }
+  },
+
+  /** A rising horn call: an outpost is ours. */
+  victoryHorn() {
+    const a = ready();
+    if (!a) return;
+    const t = a.currentTime;
+    [261.6, 329.6, 392, 523.3].forEach((f, i) => {
+      const start = t + i * 0.16;
+      tone(a, 'sawtooth', f, f, start, i === 3 ? 0.9 : 0.2).connect(filter(a, 'lowpass', 1400, 1)).connect(envelope(a, start, 0.14, 0.03, i === 3 ? 0.9 : 0.2));
+    });
+  },
+
+  /** Heartbeat when badly hurt. */
+  heartbeat() {
+    const a = ready();
+    if (!a) return;
+    const t = a.currentTime;
+    for (const [dt, peak] of [[0, 0.5], [0.22, 0.35]]) {
+      tone(a, 'sine', 70, 45, t + dt, 0.14).connect(envelope(a, t + dt, peak, 0.01, 0.15));
+    }
   },
 
   /** vol is 0..1, usually from distance to the listener. */

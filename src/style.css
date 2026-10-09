@@ -469,6 +469,69 @@ h1.victory {
   margin: 24px auto;
 }
 
+/* Title: drifting embers and a flickering glow */
+.embers {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.embers span {
+  position: absolute;
+  bottom: -10px;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: #ffb04a;
+  box-shadow: 0 0 6px 2px rgba(255, 120, 40, 0.6);
+  opacity: 0;
+  animation: ember linear infinite;
+}
+
+@keyframes ember {
+  0% { transform: translate(0, 0); opacity: 0; }
+  10% { opacity: 0.9; }
+  80% { opacity: 0.6; }
+  100% { transform: translate(var(--drift), -105vh); opacity: 0; }
+}
+
+#title-screen h1 {
+  animation: title-glow 4s ease-in-out infinite;
+}
+
+@keyframes title-glow {
+  0%, 100% { text-shadow: 0 0 24px rgba(201, 36, 42, 0.5), 0 4px 0 #3a0608; }
+  50% { text-shadow: 0 0 40px rgba(255, 60, 40, 0.8), 0 4px 0 #3a0608; }
+}
+
+.version {
+  position: absolute;
+  bottom: 14px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(216, 207, 188, 0.55);
+}
+
+.tip {
+  max-width: 420px;
+  margin: 0 auto 24px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #e9dcc0;
+}
+
+.fade {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.2s ease-out;
+}
+
 h1.fallen {
   font-size: 44px;
   letter-spacing: 4px;

@@ -1,7 +1,7 @@
 import './style.css';
 import * as THREE from 'three';
 import { Input } from './input';
-import { createWorld, respawnPoint } from './world';
+import { createWorld, respawnPoint, territoryWeight } from './world';
 import { Player } from './player';
 import type { Enemy } from './enemy';
 import { Ally, SQUAD_SIZE } from './ally';
@@ -10,7 +10,8 @@ import { Hud } from './hud';
 import { Particles } from './particles';
 import { Floaters } from './floaters';
 import { Projectiles } from './projectiles';
-import { initAudio, sfx } from './audio';
+import { initAudio, musicOutput, setVolumes, sfx } from './audio';
+import { Music, type Mood, type Theme } from './music';
 import { Campaign, type Objective } from './campaign';
 import { CAMP_BANNER } from './layout';
 import { DIFFICULTIES, loadSettings, saveSettings, type Settings } from './settings';
@@ -44,11 +45,17 @@ const settings = loadSettings();
 const hud = new Hud(settings);
 const floaters = new Floaters(hud.floaterLayer);
 
+const music = new Music();
+
 function applySettings(s: Settings) {
   camCtrl.sensitivity = s.sensitivity;
   camCtrl.invertY = s.invertY;
+  setVolumes(s.musicVolume, s.sfxVolume);
 }
 applySettings(settings);
+player.onStep = (volume) => sfx.step(volume);
+// Browsers only allow sound after the player interacts; start it on the first key or click.
+for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, () => initAudio(), { once: true });
 
 const enemies: Enemy[] = [];
 const allies = Array.from({ length: SQUAD_SIZE }, (_, i) => new Ally(scene, i));
@@ -154,6 +161,7 @@ function reinforceSquad(everyone = false) {
 
 /** Starts (or restarts after death) play from a save: hero, territory and position. */
 function enterWorld(save: SaveData) {
+  hud.fadeIn();
   player.loadHero(save.name, save.level, save.xp);
   kills = save.kills;
   playTime = save.playTime ?? 0;
@@ -308,16 +316,28 @@ hud.onKeepExploring = () => {
   hud.showScreen('none');
   lockPointer();
 };
-hud.onEndingTitle = () => {
+/** Back to the title screen (progress since the last checkpoint is dropped; the save stays). */
+function returnToTitle() {
   endingShown = false;
   phase = 'menu';
   ctx.peaceful = true;
+  ctx.arenaLock = null;
+  projectiles.clear();
   hud.showBoss(null);
+  hud.showPause(false);
+  hud.showMap(false);
+  hud.showDeath(false);
+  if (document.pointerLockElement) document.exitPointerLock();
+  const save = loadSave();
+  campaign.load(save);
   const spot = respawnPoint(CAMP_BANNER);
   player.reset(spot.x, spot.z);
   reinforceSquad(true);
-  hud.showTitle(loadSave());
-};
+  hud.fadeIn();
+  hud.showTitle(save);
+}
+hud.onEndingTitle = returnToTitle;
+hud.onQuitToTitle = returnToTitle;
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -343,10 +363,42 @@ if (testMode) {
 
 /** Slow orbit around the hero while the menus are up. */
 function updateMenuCamera(dt: number) {
-  menuOrbit += dt * 0.07;
+  menuOrbit += dt * 0.05;
   const p = player.pos;
-  camera.position.set(p.x + Math.sin(menuOrbit) * 8.5, p.y + 2.8, p.z + Math.cos(menuOrbit) * 8.5);
-  camera.lookAt(p.x, p.y + 1.4, p.z);
+  camera.position.set(p.x + Math.sin(menuOrbit) * 12, p.y + 4.2, p.z + Math.cos(menuOrbit) * 12);
+  camera.lookAt(p.x, p.y + 1.6, p.z);
+}
+
+let combatHold = 0;
+let heartbeatTimer = 0;
+
+/** Picks the soundtrack for the moment, and the heartbeat when badly hurt. */
+function updateSound(dt: number) {
+  let theme: Theme;
+  let mood: Mood = 'camp';
+  const land = campaign.territories.find((t) => territoryWeight(t.def, player.pos.x, player.pos.z) > 0.5);
+  if (land && !campaign.isLiberated(land)) mood = land.def.id;
+  const fight = campaign.activeFight;
+  if (endingShown) theme = 'victory';
+  else if (phase === 'menu') theme = 'title';
+  else if (!player.alive) theme = 'silence';
+  else if (fight) {
+    theme = 'boss';
+    mood = fight.def.id;
+  } else {
+    const r2 = 28 * 28;
+    const engaged = enemies.some((e) => e.alive && e.target !== null && e.fightActive && e.pos.distanceToSquared(player.pos) < r2);
+    combatHold = engaged ? 7 : Math.max(0, combatHold - dt);
+    theme = combatHold > 0 ? 'battle' : 'explore';
+  }
+  music.set(theme, mood);
+
+  const low = phase === 'playing' && player.alive && !endingShown && player.hp / player.maxHp < 0.3;
+  heartbeatTimer -= dt;
+  if (low && heartbeatTimer <= 0 && (input.locked || testMode)) {
+    sfx.heartbeat();
+    heartbeatTimer = 0.6 + (player.hp / player.maxHp) * 2;
+  }
 }
 
 /** Advances the game by one frame of `realDt` seconds. */
@@ -401,6 +453,7 @@ function tick(realDt: number) {
   }
 
   world.update(player.pos, realDt, campaign.gloomAt(player.pos));
+  updateSound(realDt);
   for (const z of enemies) z.updateBar(camera);
   hud.update(player, kills);
   input.endFrame();
@@ -424,6 +477,9 @@ Object.assign(window, {
     enemies,
     campaign,
     projectiles,
+    music,
+    /** The running audio context (null until the first click). */
+    audio: () => musicOutput()?.ac ?? null,
     camCtrl,
     camera,
     renderer,

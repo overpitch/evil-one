@@ -4,6 +4,7 @@ import { PER_LEVEL } from './progression';
 import { DIFFICULTIES, type Difficulty, type Settings } from './settings';
 import type { SaveData } from './save';
 import { drawMap, type MapData } from './map';
+import { sfx } from './audio';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -26,6 +27,18 @@ const CONTROLS: [string, string][] = [
 const RANDOM_NAMES = [
   'Aldric', 'Brenna', 'Cedric', 'Elara', 'Gareth', 'Isolde', 'Rowan',
   'Thorne', 'Wren', 'Osric', 'Maren', 'Bram', 'Sable', 'Tamsin',
+];
+
+const DEATH_TIPS = [
+  'An enemy glowing orange is about to strike. Hold Q to block, then hit back.',
+  'Blocking costs stamina. When the bar runs low, step back or roll instead.',
+  'Shockwaves, meteors and grabs can\'t be blocked. Roll through or away from them.',
+  'Leaders pause after their combos. That\'s your moment to attack.',
+  'Touch a red banner to heal, save, and replace fallen soldiers.',
+  'Stand back and let your soldiers draw attention while your health returns.',
+  'Too tough? Easy difficulty in Options makes enemies hit softer, and you can change it any time.',
+  'Broom-witches can only be hit when they skim low after a dive.',
+  'Vampire knights parry swings from the front. Attack right after they swing.',
 ];
 
 type Screen = 'title' | 'name' | 'intro' | 'options' | 'ending' | 'none';
@@ -79,6 +92,7 @@ export class Hud {
   onRespawn?: () => void;
   onSettings?: (settings: Settings) => void;
   onKeepExploring?: () => void;
+  onQuitToTitle?: () => void;
   onEndingTitle?: () => void;
 
   readonly floaterLayer = $('floaters');
@@ -172,6 +186,23 @@ export class Hud {
     });
     $('begin-btn').addEventListener('click', () => this.onBegin?.());
     $('keep-exploring-btn').addEventListener('click', () => this.onKeepExploring?.());
+    $('quit-btn').addEventListener('click', () => this.onQuitToTitle?.());
+    // Every menu button clicks.
+    document.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('button, .segmented label, .toggle')) sfx.click();
+    });
+
+    // Embers drifting up behind the title.
+    const embers = $('embers');
+    for (let i = 0; i < 36; i++) {
+      const ember = document.createElement('span');
+      ember.style.left = `${Math.random() * 100}%`;
+      ember.style.animationDelay = `${-Math.random() * 12}s`;
+      ember.style.animationDuration = `${8 + Math.random() * 8}s`;
+      ember.style.setProperty('--drift', `${(Math.random() - 0.5) * 160}px`);
+      ember.style.setProperty('--size', `${2 + Math.random() * 3}px`);
+      embers.append(ember);
+    }
     $('ending-title-btn').addEventListener('click', () => this.onEndingTitle?.());
 
     // Pause, death
@@ -189,7 +220,15 @@ export class Hud {
     const invertValue = $<HTMLOutputElement>('invert-value');
     const difficultyRadios = [...document.querySelectorAll<HTMLInputElement>('input[name="difficulty"]')];
     const difficultyNote = $('difficulty-note');
+    const volumeSliders: [HTMLInputElement, HTMLOutputElement, 'musicVolume' | 'sfxVolume'][] = [
+      [$<HTMLInputElement>('music-volume'), $<HTMLOutputElement>('music-volume-value'), 'musicVolume'],
+      [$<HTMLInputElement>('sfx-volume'), $<HTMLOutputElement>('sfx-volume-value'), 'sfxVolume'],
+    ];
     const render = () => {
+      for (const [slider, out, key] of volumeSliders) {
+        slider.value = String(this.settings[key]);
+        out.value = `${Math.round(this.settings[key] * 100)}%`;
+      }
       for (const r of difficultyRadios) r.checked = r.value === this.settings.difficulty;
       difficultyNote.textContent = DIFFICULTIES[this.settings.difficulty].description;
       sens.value = String(this.settings.sensitivity);
@@ -207,6 +246,13 @@ export class Hud {
       render();
       this.onSettings?.({ ...this.settings });
     });
+    for (const [slider, , key] of volumeSliders) {
+      slider.addEventListener('input', () => {
+        this.settings[key] = Number(slider.value);
+        render();
+        this.onSettings?.({ ...this.settings });
+      });
+    }
     for (const r of difficultyRadios) {
       r.addEventListener('change', () => {
         this.settings.difficulty = r.value as Difficulty;
@@ -341,11 +387,27 @@ export class Hud {
     this.showScreen('ending');
   }
 
+  /** Fades in from black (entering the world). */
+  fadeIn() {
+    const fade = $('fade');
+    fade.style.transition = 'none';
+    fade.style.opacity = '1';
+    void fade.offsetWidth;
+    fade.style.transition = '';
+    fade.style.opacity = '0';
+  }
+
   showPause(show: boolean) {
     this.pause.classList.toggle('hidden', !show);
   }
 
+  private tipIndex = Math.floor(Math.random() * DEATH_TIPS.length);
+
   showDeath(show: boolean) {
+    if (show) {
+      this.tipIndex = (this.tipIndex + 1) % DEATH_TIPS.length;
+      $('death-tip').textContent = `Tip: ${DEATH_TIPS[this.tipIndex]}`;
+    }
     this.death.classList.toggle('hidden', !show);
   }
 
@@ -461,6 +523,8 @@ export class Hud {
     this.xpText.textContent = player.atMaxLevel ? 'Max level' : `${player.xp} / ${player.xpToNext} XP`;
     this.kills.textContent = `Enemies slain: ${kills}`;
     this.slowed.classList.toggle('hidden', player.slowTimer <= 0);
-    this.vignette.style.opacity = String(player.hurtFlash);
+    // A pulsing red edge when badly hurt.
+    const low = player.alive && player.hp / player.maxHp < 0.3 ? 0.3 + 0.2 * Math.sin(performance.now() / 160) : 0;
+    this.vignette.style.opacity = String(Math.max(player.hurtFlash, low));
   }
 }

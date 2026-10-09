@@ -10,6 +10,10 @@ export interface Settings {
   /** Moving the mouse up looks down (flight-sim style). */
   invertY: boolean;
   difficulty: Difficulty;
+  /** 0..1 */
+  musicVolume: number;
+  /** 0..1 */
+  sfxVolume: number;
 }
 
 export interface DifficultyProfile {
@@ -55,7 +59,7 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyProfile> = {
 const KEY = 'evil-one.settings';
 const LEGACY_SENSITIVITY_KEY = 'evil-one.sensitivity';
 
-export const DEFAULT_SETTINGS: Settings = { sensitivity: 1, invertY: false, difficulty: 'normal' };
+export const DEFAULT_SETTINGS: Settings = { sensitivity: 1, invertY: false, difficulty: 'normal', musicVolume: 0.6, sfxVolume: 0.8 };
 
 export function loadSettings(): Settings {
   const settings = { ...DEFAULT_SETTINGS };
@@ -66,6 +70,10 @@ export function loadSettings(): Settings {
       if (typeof parsed.sensitivity === 'number' && parsed.sensitivity > 0) settings.sensitivity = parsed.sensitivity;
       if (typeof parsed.invertY === 'boolean') settings.invertY = parsed.invertY;
       if (parsed.difficulty && parsed.difficulty in DIFFICULTIES) settings.difficulty = parsed.difficulty;
+      for (const key of ['musicVolume', 'sfxVolume'] as const) {
+        const v = parsed[key];
+        if (typeof v === 'number' && v >= 0 && v <= 1) settings[key] = v;
+      }
     } else {
       // Milestone 1–2 stored only the sensitivity, under its own key.
       const legacy = Number(localStorage.getItem(LEGACY_SENSITIVITY_KEY));

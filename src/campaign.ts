@@ -363,9 +363,9 @@ export class Campaign {
     return out;
   }
 
-  private activate(cp: Checkpoint, title: string, detail: string) {
+  private activate(cp: Checkpoint, title: string, detail: string, sound = sfx.checkpoint) {
     this.current = cp;
-    sfx.checkpoint();
+    sound();
     this.events.checkpointReached(cp);
     this.events.announce(title, detail);
   }
@@ -384,7 +384,7 @@ export class Campaign {
       e.spawn(x, z, fromGround);
       if (!fromGround) ctx.particles.burst(new THREE.Vector3(x, e.pos.y + 1.4, z), 0x6a4a8a, 20, 4);
     });
-    sfx.roar();
+    sfx.warHorn();
     this.events.announce('Counterattack!', `Hold ${o.def.name}`);
   }
 
@@ -394,7 +394,7 @@ export class Campaign {
     o.checkpoint.banner.setRaised(true, true);
     this.events.awardXp(OUTPOST_XP, new THREE.Vector3(o.def.x, 3, o.def.z));
     this.touching = o.checkpoint.id;
-    this.activate(o.checkpoint, 'Outpost captured', `${o.def.name} · Game saved`);
+    this.activate(o.checkpoint, 'Outpost captured', `${o.def.name} · Game saved`, sfx.victoryHorn);
     if (this.arenaOpen(t) && t.bossState === 'sealed') {
       t.bossState = 'waiting';
       this.world.gates[t.def.id].open();

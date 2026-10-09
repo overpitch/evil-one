@@ -31,6 +31,7 @@ Then go to http://localhost:5173, choose **New Game**, name your hero, and click
 - **Difficulty:** Easy, Normal or Hard. It changes how hard enemies hit, how many hits they take, and how fast you and your soldiers heal between fights. You can switch at any time, even mid-fight.
 - **Look sensitivity.**
 - **Invert vertical look.**
+- **Music volume** and **Sound effects volume.**
 
 Options are saved in the browser, so each player keeps their own on their own device.
 
@@ -75,7 +76,8 @@ Open http://localhost:5173/?test to skip the menus and play without pointer lock
 | `src/world.ts` | Terrain, three biomes, camp, outposts, arenas, lighting, collisions |
 | `src/banner.ts` | Checkpoint banners |
 | `src/particles.ts` | Blood, dust and spark particles |
-| `src/audio.ts` | Synthesized sound effects |
+| `src/audio.ts` | Synthesized sound effects; music and effects volume |
+| `src/music.ts` | Procedural soundtrack: title, exploring (per land), battle, boss, victory |
 | `src/hud.ts` | Status bars, messages, objective marker, all menu screens |
 | `src/map.ts` | The world map |
 | `src/progression.ts` | XP curve, level stat gains, XP rewards |
