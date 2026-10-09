@@ -15,19 +15,26 @@ import { Music, type Mood, type Theme } from './music';
 import { MenuNavigator } from './menuNav';
 import { Campaign, type Objective } from './campaign';
 import { CAMP_BANNER } from './layout';
-import { DIFFICULTIES, loadSettings, saveSettings, type Settings } from './settings';
+import { DIFFICULTIES, IS_XBOX, loadSettings, saveSettings, type Settings } from './settings';
 import { loadSave, newSave, useTestSaveSlot, writeSave, type SaveData } from './save';
 import type { MapData } from './map';
 import type { GameContext } from './types';
 
+const params = new URLSearchParams(location.search);
 // ?test skips the menus, uses a separate save slot, and runs without pointer lock (for automated checks).
-const testMode = new URLSearchParams(location.search).has('test');
+const testMode = params.has('test');
 if (testMode) useTestSaveSlot();
 
-/** Zombies farther than this (on either axis) are hidden and not simulated. */
-const ACTIVE_RANGE = 80;
+const settings = loadSettings();
+// ?lite forces Low graphics for this visit (for trying it out on a struggling device).
+if (params.has('lite')) settings.graphics = 'low';
+const startedLow = settings.graphics === 'low';
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+/** Enemies farther than this (on either axis) are hidden and not simulated. Lower on Low graphics. */
+let activeRange = 80;
+
+// Edge smoothing can only be chosen when the renderer is created, so Low turns it off at start-up.
+const renderer = new THREE.WebGLRenderer({ antialias: !startedLow, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -42,7 +49,6 @@ const projectiles = new Projectiles(scene);
 const player = new Player(scene);
 const camCtrl = new ThirdPersonCamera(camera);
 const input = new Input(renderer.domElement);
-const settings = loadSettings();
 const hud = new Hud(settings);
 const floaters = new Floaters(hud.floaterLayer);
 
@@ -52,10 +58,12 @@ function applySettings(s: Settings) {
   camCtrl.sensitivity = s.sensitivity;
   camCtrl.invertY = s.invertY;
   setVolumes(s.musicVolume, s.sfxVolume);
-  // Low graphics: no real-time shadows and fewer pixels, for slower computers.
-  renderer.setPixelRatio(s.graphics === 'low' ? Math.min(window.devicePixelRatio, 1) : Math.min(window.devicePixelRatio, 2));
+  // Low graphics: no real-time shadows, fewer pixels (fewer still on Xbox), fewer distant enemies.
+  const low = s.graphics === 'low';
+  renderer.setPixelRatio(low ? Math.min(window.devicePixelRatio, 1) * (IS_XBOX ? 0.75 : 1) : Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  world.setShadows(s.graphics === 'high');
+  world.setShadows(!low);
+  activeRange = low ? 55 : 80;
 }
 applySettings(settings);
 player.onStep = (volume) => sfx.step(volume);
@@ -228,7 +236,7 @@ function separateBodies() {
 function updateEnemies(dt: number) {
   for (const z of enemies) {
     if (z.state === 'dormant') continue;
-    const near = Math.abs(z.pos.x - player.pos.x) < ACTIVE_RANGE && Math.abs(z.pos.z - player.pos.z) < ACTIVE_RANGE;
+    const near = Math.abs(z.pos.x - player.pos.x) < activeRange && Math.abs(z.pos.z - player.pos.z) < activeRange;
     if (near) z.update(dt, ctx);
     else z.sleep(dt);
   }
@@ -481,11 +489,54 @@ function tick(realDt: number) {
   input.endFrame();
 }
 
+// ---------- Diagnostics ----------
+
+/** ?stats shows frame rate, work per frame, draw calls, memory and running time. */
+const statsEl = params.has('stats') ? document.body.appendChild(Object.assign(document.createElement('div'), { className: 'stats' })) : null;
+const startedAt = performance.now();
+let statFrames = 0;
+let statWork = 0;
+let statSince = performance.now();
+
+function updateStats(now: number, workMs: number) {
+  if (!statsEl) return;
+  statFrames++;
+  statWork += workMs;
+  if (now - statSince < 500) return;
+  const fps = (statFrames * 1000) / (now - statSince);
+  const up = Math.floor((now - startedAt) / 1000);
+  const heap = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize;
+  statsEl.textContent = [
+    `${fps.toFixed(0)} fps`,
+    `${(statWork / statFrames).toFixed(1)} ms work`,
+    `${renderer.info.render.calls} draws`,
+    heap ? `${(heap / 1048576).toFixed(0)} MB` : 'memory n/a',
+    `${renderer.domElement.width}×${renderer.domElement.height}`,
+    `${settings.graphics === 'low' || startedLow ? 'low' : 'high'}`,
+    `up ${Math.floor(up / 60)}:${String(up % 60).padStart(2, '0')}`,
+  ].join(' · ');
+  statFrames = 0;
+  statWork = 0;
+  statSince = now;
+}
+
+// If the browser takes the graphics away (out of GPU memory), say so instead of freezing.
+renderer.domElement.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  if (document.pointerLockElement) document.exitPointerLock();
+  const box = document.body.appendChild(document.createElement('div'));
+  box.className = 'overlay';
+  box.innerHTML =
+    '<div class="panel"><h2>The graphics stopped</h2><p class="tip">The browser ran out of graphics memory. Your game is saved at the last checkpoint. Try Options → Graphics → Low after reloading.</p><button>Reload</button></div>';
+  box.querySelector('button')!.addEventListener('click', () => location.reload());
+});
+
 let last = performance.now();
 function frame(now: number) {
   tick(Math.min((now - last) / 1000, 0.05));
   last = now;
   renderer.render(scene, camera);
+  updateStats(now, performance.now() - now);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

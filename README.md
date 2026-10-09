@@ -70,6 +70,14 @@ Your squad heals between fights. When you enter an enemy land, fallen soldiers a
 
 Touching a standing red banner makes it your checkpoint: it saves the game, restores your health and replaces fallen soldiers. Capturing an outpost raises a new banner there. If you die, you return to your last checkpoint and lose any XP earned since.
 
+## Troubleshooting a device
+
+Add these to the end of the game's address:
+
+- **`?probe`**: a tiny test page (one spinning shape and a timer). If a browser closes even this, the problem is the device or its settings, not the game.
+- **`?stats`**: shows frame rate, work per frame, draw calls, memory, resolution, graphics quality and running time in the corner.
+- **`?lite`**: forces Low graphics for that visit without changing saved Options. On Xbox, Low is chosen automatically the first time. It turns off shadows and edge smoothing, renders at reduced resolution, and simulates fewer distant enemies.
+
 ## Debugging
 
 Open http://localhost:5173/?test to skip the menus and play without pointer lock. Test runs use a separate save slot. In the browser console, `__game` exposes the player, allies, enemies, campaign and camera. `__game.step(seconds)` advances the game at a fixed 60 fps, which also works while the tab is in the background.

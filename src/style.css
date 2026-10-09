@@ -538,6 +538,19 @@ h1.victory {
   color: #e9dcc0;
 }
 
+.stats {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  padding: 4px 8px;
+  font: 12px/1.4 ui-monospace, Menlo, monospace;
+  color: #9fff9f;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 100;
+}
+
 .fade {
   position: fixed;
   inset: 0;

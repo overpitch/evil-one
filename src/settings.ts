@@ -59,6 +59,9 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyProfile> = {
   },
 };
 
+/** Xbox browsers have tight limits, so they start on Low graphics. */
+export const IS_XBOX = /xbox/i.test(navigator.userAgent);
+
 const KEY = 'evil-one.settings';
 const LEGACY_SENSITIVITY_KEY = 'evil-one.sensitivity';
 
@@ -79,6 +82,7 @@ export function loadSettings(): Settings {
         if (typeof v === 'number' && v >= 0 && v <= 1) settings[key] = v;
       }
     } else {
+      if (IS_XBOX) settings.graphics = 'low';
       // Milestone 1–2 stored only the sensitivity, under its own key.
       const legacy = Number(localStorage.getItem(LEGACY_SENSITIVITY_KEY));
       if (legacy > 0) settings.sensitivity = legacy;
