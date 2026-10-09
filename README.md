@@ -10,6 +10,12 @@ It works in Chrome, Edge and Safari on computers and Chromebooks, and in Microso
 
 Every push to `main` rebuilds and republishes the game automatically (see `.github/workflows/deploy.yml`).
 
+### On Xbox (Microsoft Edge)
+
+1. Open the address above in Edge.
+2. **Hold the ☰ Menu button for about a second** to switch the controller from browser controls to **game controls**. Until you do, the sticks move a cursor and B means "go back". The game shows a reminder, and Back no longer leaves the game.
+3. Low graphics is chosen automatically on Xbox.
+
 ## Run it locally
 
 ```bash

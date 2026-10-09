@@ -268,14 +268,15 @@ function lockPointer() {
   initAudio();
   (document.activeElement as HTMLElement | null)?.blur();
   if (testMode) return;
-  // A controller doesn't need the mouse captured: just close the menu.
-  if (input.mode === 'gamepad') {
+  // A controller (and any Xbox, where the browser can't capture the mouse) just closes the menu.
+  if (input.mode === 'gamepad' || IS_XBOX) {
     hud.showPause(false);
     return;
   }
   input.requestLock();
   setTimeout(() => {
-    if (phase === 'playing' && !input.locked && player.alive && !hud.optionsOpen) hud.showPause(true);
+    const usingPad = input.mode === 'gamepad';
+    if (phase === 'playing' && !input.locked && !usingPad && player.alive && !hud.optionsOpen) hud.showPause(true);
   }, 1200);
 }
 
@@ -436,7 +437,7 @@ function tick(realDt: number) {
     updateMenuCamera(realDt);
   } else {
     // With a controller there's no mouse capture: play whenever no menu is open.
-    const padPlay = input.mode === 'gamepad' && !menuNav.menuOpen;
+    const padPlay = (input.mode === 'gamepad' || IS_XBOX) && !menuNav.menuOpen;
     if (padPlay && input.pausePressed && !resumed) hud.showPause(true);
     if ((input.locked || padPlay || testMode) && !endingShown) {
       playTime += realDt;
@@ -484,9 +485,50 @@ function tick(realDt: number) {
 
   world.update(player.pos, realDt, campaign.gloomAt(player.pos));
   updateSound(realDt);
+  updateXboxTip(realDt);
   for (const z of enemies) z.updateBar(camera);
   hud.update(player, kills);
   input.endFrame();
+}
+
+// ---------- Xbox ----------
+
+const XBOX_TIP = 'Hold the ☰ Menu button for a second to switch the controller to game controls';
+let xboxTipTimer = 0;
+
+// Console browsers scroll the page with the right stick; there's nothing to scroll, so ignore it.
+window.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+
+if (IS_XBOX) {
+  input.mode = 'gamepad';
+  // Edge on Xbox maps the controller's B button to browser Back. Keep an extra
+  // history entry on top so Back stays on the game. Browsers ignore entries
+  // added without a click or key press, so it's (re)armed on real input.
+  let guarded = false;
+  const guard = () => {
+    if (guarded) return;
+    history.pushState({ evilOne: true }, '');
+    guarded = true;
+  };
+  for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, guard);
+  window.addEventListener('popstate', () => {
+    guarded = false;
+    guard();
+    hud.announce('Still here!', XBOX_TIP);
+  });
+  document.getElementById('xbox-tip')!.classList.remove('hidden');
+}
+
+/** On Xbox, if the hero isn't getting controller input but the cursor is moving, explain how to switch. */
+function updateXboxTip(dt: number) {
+  if (!IS_XBOX || phase !== 'playing') return;
+  xboxTipTimer -= dt;
+  // The cursor is moving but the game hasn't heard from the controller: Edge is still in browser mode.
+  const now = performance.now();
+  if (xboxTipTimer <= 0 && now - input.lastMouseMove < 1500 && now - input.lastPadInput > 3000) {
+    hud.announce('Controller', XBOX_TIP);
+    xboxTipTimer = 20;
+  }
 }
 
 // ---------- Diagnostics ----------

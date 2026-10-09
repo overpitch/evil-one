@@ -46,6 +46,10 @@ export class Input {
   mouseDY = 0;
   locked = false;
   mode: 'mouse' | 'gamepad' = 'mouse';
+  /** When the mouse (or a console browser's controller cursor) last moved, in ms. */
+  lastMouseMove = 0;
+  /** When the game last received real controller input, in ms. */
+  lastPadInput = 0;
   onLockChange?: (locked: boolean) => void;
 
   private readonly down = new Set<string>();
@@ -73,6 +77,7 @@ export class Input {
     window.addEventListener('blur', () => this.down.clear());
 
     document.addEventListener('mousemove', (e) => {
+      this.lastMouseMove = performance.now();
       if (!this.locked) return;
       this.mouseDX += e.movementX;
       this.mouseDY += e.movementY;
@@ -122,7 +127,10 @@ export class Input {
     });
     for (const i of this.padDown) if (!previous.has(i)) this.padPressed.add(i);
     this.axes = [0, 1, 2, 3].map((i) => deadzone(pad.axes[i] ?? 0));
-    if (this.padPressed.size > 0 || this.axes.some((a) => Math.abs(a) > 0.3)) this.mode = 'gamepad';
+    if (this.padPressed.size > 0 || this.axes.some((a) => Math.abs(a) > 0.3)) {
+      this.mode = 'gamepad';
+      this.lastPadInput = performance.now();
+    }
 
     // Menu navigation: d-pad or left stick, with key-repeat while held.
     const [lx, ly] = this.axes;

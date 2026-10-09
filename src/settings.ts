@@ -17,6 +17,8 @@ export interface Settings {
   sfxVolume: number;
   /** 'low' turns off shadows and renders at a lower resolution, for slower computers. */
   graphics: Graphics;
+  /** Device-specific defaults (Low on Xbox) have been applied once. */
+  deviceDefaults?: boolean;
 }
 
 export interface DifficultyProfile {
@@ -60,7 +62,7 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyProfile> = {
 };
 
 /** Xbox browsers have tight limits, so they start on Low graphics. */
-export const IS_XBOX = /xbox/i.test(navigator.userAgent);
+export const IS_XBOX = /xbox/i.test(navigator.userAgent) || new URLSearchParams(location.search).has('xbox'); // ?xbox to test elsewhere
 
 const KEY = 'evil-one.settings';
 const LEGACY_SENSITIVITY_KEY = 'evil-one.sensitivity';
@@ -77,18 +79,24 @@ export function loadSettings(): Settings {
       if (typeof parsed.invertY === 'boolean') settings.invertY = parsed.invertY;
       if (parsed.difficulty && parsed.difficulty in DIFFICULTIES) settings.difficulty = parsed.difficulty;
       if (parsed.graphics === 'high' || parsed.graphics === 'low') settings.graphics = parsed.graphics;
+      settings.deviceDefaults = parsed.deviceDefaults === true;
       for (const key of ['musicVolume', 'sfxVolume'] as const) {
         const v = parsed[key];
         if (typeof v === 'number' && v >= 0 && v <= 1) settings[key] = v;
       }
     } else {
-      if (IS_XBOX) settings.graphics = 'low';
       // Milestone 1–2 stored only the sensitivity, under its own key.
       const legacy = Number(localStorage.getItem(LEGACY_SENSITIVITY_KEY));
       if (legacy > 0) settings.sensitivity = legacy;
     }
   } catch {
     /* storage unavailable or corrupt: use defaults */
+  }
+  // Xboxes start on Low once, even if Options were saved before this existed; players can switch back.
+  if (!settings.deviceDefaults) {
+    if (IS_XBOX) settings.graphics = 'low';
+    settings.deviceDefaults = true;
+    saveSettings(settings);
   }
   return settings;
 }
