@@ -19,6 +19,7 @@ root.innerHTML = `
   <div style="color:#b8ad96;margin:4px 0 16px">Press A once first (so B can't leave this page). Then press every button and move both sticks, and take a photo of this screen. Hold ☰ Menu to switch to game controls, then do it again and take a second photo.</div>
   <div id="device"></div>
   <button id="emulate" style="font:inherit;font-size:20px;margin:12px 0;padding:8px 18px">Try: switch Edge to gamepad mode</button>
+  <button id="back-to-game" style="font:inherit;font-size:20px;margin:12px 0 12px 12px;padding:8px 18px">Back to the game</button>
   <div id="live" style="margin:8px 0 16px;padding:12px 16px;background:#1d1d2a;border-radius:6px"></div>
   <div style="color:#ffd36b">Events the page received (newest first):</div>
   <div id="log" style="font-size:19px;white-space:pre"></div>`;
@@ -60,6 +61,8 @@ window.addEventListener('mousemove', () => mouseMoves++);
 window.addEventListener('wheel', (e) => add(`wheel (scroll) ${e.deltaY.toFixed(0)}`), { passive: true });
 window.addEventListener('gamepadconnected', (e) => add(`gamepad connected: ${(e as GamepadEvent).gamepad.id}`));
 window.addEventListener('gamepaddisconnected', () => add('gamepad disconnected'));
+
+$('back-to-game').addEventListener('click', () => location.assign('./'));
 
 $('emulate').addEventListener('click', () => {
   if ('gamepadInputEmulation' in nav) {

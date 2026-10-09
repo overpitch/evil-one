@@ -192,6 +192,8 @@ export class Hud {
     $('begin-btn').addEventListener('click', () => this.onBegin?.());
     $('keep-exploring-btn').addEventListener('click', () => this.onKeepExploring?.());
     $('quit-btn').addEventListener('click', () => this.onQuitToTitle?.());
+    // The controller test page (same site, so no address to type on a console).
+    $('controller-test-btn').addEventListener('click', () => location.assign('./?padtest'));
     // Every menu button clicks.
     document.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button, .segmented label, .toggle')) sfx.click();
