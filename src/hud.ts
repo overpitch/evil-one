@@ -28,7 +28,21 @@ const RANDOM_NAMES = [
   'Thorne', 'Wren', 'Osric', 'Maren', 'Bram', 'Sable', 'Tamsin',
 ];
 
-type Screen = 'title' | 'name' | 'intro' | 'options' | 'none';
+type Screen = 'title' | 'name' | 'intro' | 'options' | 'ending' | 'none';
+
+export interface EndingStats {
+  name: string;
+  level: number;
+  kills: number;
+  playSeconds: number;
+  difficulty: string;
+}
+
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const h = Math.floor(m / 60);
+  return h > 0 ? `${h} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
+}
 
 function storageGet(key: string) {
   try {
@@ -64,6 +78,8 @@ export class Hud {
   onResume?: () => void;
   onRespawn?: () => void;
   onSettings?: (settings: Settings) => void;
+  onKeepExploring?: () => void;
+  onEndingTitle?: () => void;
 
   readonly floaterLayer = $('floaters');
 
@@ -92,6 +108,7 @@ export class Hud {
     name: $('name-screen'),
     intro: $('intro-screen'),
     options: $('options-screen'),
+    ending: $('ending-screen'),
   };
   private readonly pause = $('pause-screen');
   private readonly death = $('death-screen');
@@ -154,6 +171,8 @@ export class Hud {
       this.onNameChosen?.(result.name);
     });
     $('begin-btn').addEventListener('click', () => this.onBegin?.());
+    $('keep-exploring-btn').addEventListener('click', () => this.onKeepExploring?.());
+    $('ending-title-btn').addEventListener('click', () => this.onEndingTitle?.());
 
     // Pause, death
     $('resume-btn').addEventListener('click', () => this.onResume?.());
@@ -209,7 +228,8 @@ export class Hud {
   /** Shows one menu screen (or none) and hides the rest. */
   showScreen(screen: Screen) {
     for (const [name, el] of Object.entries(this.screens)) el.classList.toggle('hidden', name !== screen);
-    const inMenus = screen === 'title' || screen === 'name' || screen === 'intro' || (screen === 'options' && this.optionsReturn === 'title');
+    const inMenus =
+      screen === 'title' || screen === 'name' || screen === 'intro' || screen === 'ending' || (screen === 'options' && this.optionsReturn === 'title');
     this.hud.classList.toggle('hidden', inMenus);
     if (screen === 'name') {
       this.nameInput.value = storageGet(LAST_NAME_KEY) ?? '';
@@ -226,7 +246,7 @@ export class Hud {
   showTitle(save: SaveData | null) {
     this.hasSave = save !== null;
     $('continue-btn').classList.toggle('hidden', !save);
-    if (save) $('continue-sub').textContent = `${save.name} · Level ${save.level}`;
+    if (save) $('continue-sub').textContent = `${save.name} · Level ${save.level}${save.leaders.includes('zomawi') ? ' · Victorious' : ''}`;
     $('confirm-text').textContent = save
       ? `Start a new game? Your saved hero, ${save.name} (Level ${save.level}), will be erased.`
       : '';
@@ -279,6 +299,46 @@ export class Hud {
       el.style.animation = '';
     }
     this.showScreen('intro');
+  }
+
+  /** The victory screen: the story's end, with the hero's name, and their stats. */
+  showEnding(stats: EndingStats) {
+    const story = $('ending-story');
+    story.replaceChildren();
+    const hero = () => Object.assign(document.createElement('span'), { className: 'hero', textContent: stats.name });
+    const lines: (string | HTMLElement)[][] = [
+      ['Zomawi falls, and with it the dark magic that bound the three armies.'],
+      ['In the Zombie Lands the dead lie still. The witch fires gutter out. The vampire lords flee the dawn.'],
+      ['They say Zomawi was a general of the human army, long ago. Today, at last, the general rests.'],
+      ['The army marches home with ', hero(), ' at its head.'],
+      ['Songs will be sung of the soldier who broke the Evil One.'],
+    ];
+    lines.forEach((parts, i) => {
+      const p = document.createElement('p');
+      p.append(...parts);
+      p.style.animationDelay = `${0.5 + i * 1.3}s`;
+      story.append(p);
+    });
+    const dl = $('ending-stats');
+    dl.replaceChildren();
+    const rows: [string, string][] = [
+      ['Hero', stats.name],
+      ['Level', String(stats.level)],
+      ['Enemies slain', String(stats.kills)],
+      ['Time played', formatTime(stats.playSeconds)],
+      ['Difficulty', stats.difficulty],
+    ];
+    for (const [k, v] of rows) {
+      dl.append(Object.assign(document.createElement('dt'), { textContent: k }), Object.assign(document.createElement('dd'), { textContent: v }));
+    }
+    const after = `${0.5 + lines.length * 1.3}s`;
+    for (const el of [dl, this.screens.ending.querySelector('.ending-buttons') as HTMLElement]) {
+      el.style.animation = 'none';
+      void el.offsetWidth;
+      el.style.animation = '';
+      el.style.animationDelay = after;
+    }
+    this.showScreen('ending');
   }
 
   showPause(show: boolean) {

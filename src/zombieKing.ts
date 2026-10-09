@@ -33,7 +33,7 @@ const SHOCKWAVE_DAMAGE = 28;
  * Expanding ring from the ground pound. It can't be blocked: roll through
  * it (the dodge roll's invincibility frames) or be out of range.
  */
-class Shockwave {
+export class Shockwave {
   readonly mesh: THREE.Mesh;
   private radius = 0;
   private active = false;

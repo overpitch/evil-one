@@ -7,6 +7,7 @@ import { createVampire } from './vampires';
 import { ZombieKing } from './zombieKing';
 import { WitchQueen } from './witchQueen';
 import { VampireLord } from './vampireLord';
+import { Zomawi } from './zomawi';
 
 /** Makes any regular enemy by kind. */
 export function createEnemy(scene: THREE.Scene, kind: EnemyKind): Enemy {
@@ -34,5 +35,7 @@ export function createLeader(scene: THREE.Scene, id: LeaderId): Enemy {
       return new WitchQueen(scene);
     case 'vampire-lord':
       return new VampireLord(scene);
+    case 'zomawi':
+      return new Zomawi(scene);
   }
 }

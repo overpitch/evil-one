@@ -452,6 +452,23 @@ button.secondary:hover {
   to { opacity: 1; transform: none; }
 }
 
+h1.victory {
+  color: #ffd36b;
+  text-shadow: 0 0 24px rgba(255, 190, 60, 0.5), 0 4px 0 #5a3a08;
+  margin-bottom: 24px;
+}
+
+.ending-stats,
+.ending-buttons {
+  opacity: 0;
+  animation: fade-in 0.8s ease-out forwards;
+}
+
+.ending-stats {
+  max-width: 320px;
+  margin: 24px auto;
+}
+
 h1.fallen {
   font-size: 44px;
   letter-spacing: 4px;

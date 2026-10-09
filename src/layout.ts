@@ -7,8 +7,8 @@ export type WitchKind = 'hexer' | 'broomWitch' | 'witchDecoy';
 export type VampireKind = 'thrall' | 'knight';
 export type EnemyKind = ZombieKind | WitchKind | VampireKind;
 
-export type TerritoryId = 'zombie' | 'witch' | 'vampire';
-export type LeaderId = 'zombie-king' | 'witch-queen' | 'vampire-lord';
+export type TerritoryId = 'zombie' | 'witch' | 'vampire' | 'fortress';
+export type LeaderId = 'zombie-king' | 'witch-queen' | 'vampire-lord' | 'zomawi';
 
 export interface Spot {
   x: number;
@@ -28,7 +28,7 @@ export interface OutpostDef {
   /** [kind, offsetX, offsetZ] relative to the outpost center. */
   spawns: [EnemyKind, number, number][];
   /** Scenery for the clearing. */
-  decor: 'graves' | 'ruins' | 'bones' | 'mushrooms' | 'huts' | 'hangingWood' | 'chapel' | 'mill' | 'pens';
+  decor: 'graves' | 'ruins' | 'bones' | 'mushrooms' | 'huts' | 'hangingWood' | 'chapel' | 'mill' | 'pens' | 'spikes';
 }
 
 export interface ArenaDef {
@@ -60,6 +60,8 @@ export interface TerritoryDef {
     deathLine: string;
   };
   liberatedTitle: string;
+  /** Leaders that must fall before this land opens at all (Zomawi's fortress). */
+  requires?: LeaderId[];
 }
 
 /** Point on a circle around a center, at a compass angle (0 = north/+Z). */
@@ -68,6 +70,9 @@ const around = (c: Spot, angle: number, r: number): Spot => ({ x: c.x + Math.sin
 const ZOMBIE_ARENA: ArenaDef = { x: 8, z: 128, r: 14, gateAngle: Math.PI };
 const WITCH_ARENA: ArenaDef = { x: 124, z: 10, r: 14, gateAngle: -Math.PI / 2 };
 const VAMPIRE_ARENA: ArenaDef = { x: -124, z: 10, r: 14, gateAngle: Math.PI / 2 };
+const FORTRESS_ARENA: ArenaDef = { x: 0, z: -122, r: 16, gateAngle: 0 };
+
+export const ARMY_LEADERS: LeaderId[] = ['zombie-king', 'witch-queen', 'vampire-lord'];
 
 export const TERRITORIES: TerritoryDef[] = [
   {
@@ -95,13 +100,31 @@ export const TERRITORIES: TerritoryDef[] = [
         spawns: [['shambler', -3, 2], ['shambler', 3, 3], ['shambler', 0, -3], ['shambler', -4, -2], ['runner', 4, -2], ['runner', -1, 5], ['brute', 0, 1]],
       },
       {
+        id: 'corpse-mire',
+        name: 'The Corpse Mire',
+        x: -42,
+        z: 82,
+        flatRadius: 12,
+        decor: 'bones',
+        spawns: [['shambler', -3, 2], ['shambler', 3, 2], ['shambler', 0, -3], ['shambler', -3, -3], ['runner', 3, -3], ['brute', 0, 1]],
+      },
+      {
         id: 'bone-pit',
         name: 'The Bone Pit',
         x: -26,
-        z: 104,
+        z: 108,
         flatRadius: 12,
         decor: 'bones',
         spawns: [['shambler', -3, 3], ['shambler', 3, 3], ['shambler', -3, -3], ['shambler', 3, -3], ['runner', 0, 4.5], ['runner', 0, -4.5], ['brute', 0, 0]],
+      },
+      {
+        id: 'plague-farm',
+        name: 'The Plague Farm',
+        x: 36,
+        z: 114,
+        flatRadius: 15,
+        decor: 'ruins',
+        spawns: [['shambler', -3, 2], ['shambler', 3, 2], ['runner', -4, -3], ['runner', 4, -3], ['brute', -1.5, 0], ['brute', 1.5, 0]],
       },
     ],
     patrol: {
@@ -154,6 +177,24 @@ export const TERRITORIES: TerritoryDef[] = [
         decor: 'hangingWood',
         spawns: [['hexer', -3, 4], ['hexer', 3, 4], ['hexer', -4, -3], ['hexer', 4, -3], ['broomWitch', 0, 0], ['broomWitch', 0, -4]],
       },
+      {
+        id: 'toadstool-ring',
+        name: 'The Toadstool Ring',
+        x: 116,
+        z: 40,
+        flatRadius: 12,
+        decor: 'mushrooms',
+        spawns: [['hexer', -4, 2], ['hexer', 4, 2], ['hexer', 0, -4], ['broomWitch', -2, 0], ['broomWitch', 2, 0]],
+      },
+      {
+        id: 'witchlight-bog',
+        name: 'Witchlight Bog',
+        x: 122,
+        z: -22,
+        flatRadius: 12,
+        decor: 'hangingWood',
+        spawns: [['hexer', -4, 3], ['hexer', 4, 3], ['hexer', -4, -3], ['hexer', 4, -3], ['broomWitch', 0, 0]],
+      },
     ],
     patrol: {
       route: [{ x: 60, z: 12 }, { x: 78, z: 22 }, { x: 84, z: 0 }, { x: 70, z: -18 }],
@@ -205,6 +246,24 @@ export const TERRITORIES: TerritoryDef[] = [
         decor: 'pens',
         spawns: [['thrall', -4, 4], ['thrall', 4, 4], ['thrall', -4, -4], ['thrall', 4, -4], ['thrall', 0, 4.5], ['knight', -1.5, 0], ['knight', 1.5, 0]],
       },
+      {
+        id: 'ashen-cemetery',
+        name: 'The Ashen Cemetery',
+        x: -116,
+        z: 40,
+        flatRadius: 13,
+        decor: 'graves',
+        spawns: [['thrall', -3, 3], ['thrall', 3, 3], ['thrall', -3, -3], ['thrall', 3, -3], ['thrall', 0, 4], ['knight', 0, 0]],
+      },
+      {
+        id: 'ravenhold-ruins',
+        name: 'Ravenhold Ruins',
+        x: -122,
+        z: -22,
+        flatRadius: 15,
+        decor: 'ruins',
+        spawns: [['thrall', -4, 3], ['thrall', 4, 3], ['thrall', -3, -4], ['thrall', 3, -4], ['knight', -1.5, 0], ['knight', 1.5, 0]],
+      },
     ],
     patrol: {
       route: [{ x: -60, z: 12 }, { x: -78, z: 22 }, { x: -84, z: 0 }, { x: -70, z: -18 }],
@@ -223,18 +282,56 @@ export const TERRITORIES: TerritoryDef[] = [
     },
     liberatedTitle: 'Vampire Lands liberated',
   },
+  {
+    id: 'fortress',
+    name: "Zomawi's Fortress",
+    center: { x: 0, z: -108, r: 34 },
+    recommendedLevel: 10,
+    requires: ARMY_LEADERS,
+    outposts: [
+      {
+        id: 'fortress-courtyard',
+        name: 'The Fortress Courtyard',
+        x: 0,
+        z: -84,
+        flatRadius: 13,
+        decor: 'spikes',
+        spawns: [
+          ['brute', 0, 0],
+          ['knight', -3, 2],
+          ['knight', 3, 2],
+          ['hexer', -5, -3],
+          ['hexer', 5, -3],
+          ['broomWitch', 0, 4],
+          ['runner', -2, 5],
+          ['runner', 2, 5],
+        ],
+      },
+    ],
+    patrol: { route: [{ x: 0, z: -78 }], kinds: [] },
+    arena: FORTRESS_ARENA,
+    throne: { x: 0, z: -129 },
+    gate: { id: 'fortress-gate', name: 'Fortress Gate', ...around(FORTRESS_ARENA, 0, FORTRESS_ARENA.r + 4) },
+    leader: {
+      id: 'zomawi',
+      title: 'Zomawi',
+      minionKind: 'runner',
+      minionCount: 8,
+      introLine: 'Another soldier of the human army. I was one, once. Kneel, and I will make you more.',
+      deathLine: 'The witches... the grave... at last... it is quiet...',
+    },
+    liberatedTitle: 'Zomawi has fallen',
+  },
 ];
 
 export const ZOMBIE_LAND = TERRITORIES[0];
 export const WITCH_LAND = TERRITORIES[1];
 export const VAMPIRE_LAND = TERRITORIES[2];
+export const FORTRESS = TERRITORIES[3];
 
-/** Ruined houses in the Rotting Village, as offsets from its center: [x, z, halfWidth, halfDepth]. */
+/** Ruined houses in villages, as offsets from the outpost center: [x, z, halfWidth, halfDepth]. */
 export const VILLAGE_RUINS: [number, number, number, number][] = [
   [-9, 7, 3, 2.5],
   [9, -6, 2.5, 3],
   [-8, -8, 3, 2.2],
 ];
-
-/** Zomawi's fortress, sealed until all three leaders fall. */
-export const ZOMAWI_FORTRESS = { x: 0, z: -115, r: 25 };

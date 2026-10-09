@@ -9,8 +9,10 @@ export interface SaveData {
   checkpoint: string;
   /** Ids of captured outposts. */
   captured: string[];
-  /** Ids of defeated army leaders. */
+  /** Ids of defeated army leaders (and 'zomawi' once the game is won). */
   leaders: string[];
+  /** Seconds of play so far. */
+  playTime?: number;
   savedAt: number;
 }
 

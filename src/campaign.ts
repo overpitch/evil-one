@@ -4,7 +4,7 @@ import { EnemyGroup, type Enemy } from './enemy';
 import { createEnemy, createLeader } from './enemies';
 import type { GameContext } from './types';
 import { territoryWeight, type World } from './world';
-import { CAMP_BANNER, TERRITORIES, type OutpostDef, type TerritoryDef, type TerritoryId } from './layout';
+import { ARMY_LEADERS, CAMP_BANNER, TERRITORIES, type EnemyKind, type OutpostDef, type TerritoryDef, type TerritoryId } from './layout';
 import type { SaveData } from './save';
 import { OUTPOST_XP } from './progression';
 import { sfx } from './audio';
@@ -12,6 +12,8 @@ import { sfx } from './audio';
 const TOUCH_RADIUS = 3;
 const PATROL_RESPAWN = 45;
 const PATROL_MOVE = 25;
+/** Counterattack size, as a share of the outpost's garrison. */
+const WAVE_SHARE = 0.7;
 
 export interface Checkpoint {
   id: string;
@@ -24,11 +26,15 @@ export interface Checkpoint {
 export interface Outpost {
   def: OutpostDef;
   group: EnemyGroup;
-  captured: boolean;
+  /** The garrison holding the outpost at the start. */
+  garrison: Enemy[];
+  /** The counterattack that arrives once the garrison falls. */
+  wave: Enemy[];
+  phase: 'garrison' | 'counterattack' | 'captured';
   checkpoint: Checkpoint;
 }
 
-/** One enemy army's land: outposts, a roaming patrol, and its leader's arena. */
+/** One enemy land: outposts, a roaming patrol, and its leader's arena. */
 export interface Territory {
   def: TerritoryDef;
   outposts: Outpost[];
@@ -40,7 +46,7 @@ export interface Territory {
   leader: Enemy;
   leaderGroup: EnemyGroup;
   minions: Enemy[];
-  bossState: 'waiting' | 'fighting' | 'defeated';
+  bossState: 'sealed' | 'waiting' | 'fighting' | 'defeated';
   victoryTimer: number;
 }
 
@@ -60,12 +66,22 @@ export interface CampaignEvents {
   enteredTerritory(t: Territory): void;
   bossStarted(name: string): void;
   bossEnded(): void;
+  /** Zomawi has fallen: the end of the war. */
+  victory(): void;
   save(): void;
 }
 
+/** The kinds that make up a counterattack: most of the garrison, minus decoys. */
+function waveKinds(def: OutpostDef): EnemyKind[] {
+  const kinds = def.spawns.map(([k]) => k).filter((k) => k !== 'witchDecoy');
+  return kinds.slice(0, Math.max(2, Math.ceil(kinds.length * WAVE_SHARE)));
+}
+
 /**
- * The war across all three enemy lands: outposts to capture, checkpoints,
- * roaming patrols, and each leader's arena fight.
+ * The war across every enemy land: outposts to capture (each answered by a
+ * counterattack), checkpoints, roaming patrols, leader arenas that open only
+ * once a land's outposts have all fallen, and Zomawi's fortress, sealed
+ * until all three army leaders are dead.
  */
 export class Campaign {
   readonly checkpoints: Checkpoint[] = [];
@@ -100,10 +116,11 @@ export class Campaign {
 
     this.camp = this.current = checkpoint(CAMP_BANNER.id, CAMP_BANNER.name, CAMP_BANNER.x, CAMP_BANNER.z);
     for (const def of TERRITORIES) {
-      const outposts = def.outposts.map((o) => {
+      const outposts = def.outposts.map((o): Outpost => {
         const group = new EnemyGroup();
-        for (const [kind] of o.spawns) member(createEnemy(scene, kind), group);
-        return { def: o, group, captured: false, checkpoint: checkpoint(o.id, o.name, o.x, o.z) };
+        const garrison = o.spawns.map(([kind]) => member(createEnemy(scene, kind), group));
+        const wave = waveKinds(o).map((kind) => member(createEnemy(scene, kind), group));
+        return { def: o, group, garrison, wave, phase: 'garrison', checkpoint: checkpoint(o.id, o.name, o.x, o.z) };
       });
       const patrol = new EnemyGroup();
       for (const kind of def.patrol.kinds) member(createEnemy(scene, kind), patrol);
@@ -126,7 +143,7 @@ export class Campaign {
         leader,
         leaderGroup,
         minions,
-        bossState: 'waiting',
+        bossState: 'sealed',
         victoryTimer: -1,
       });
       this.centers.set(def.id, new THREE.Vector3(def.arena.x, 0, def.arena.z));
@@ -142,12 +159,30 @@ export class Campaign {
     return this.territories.find((t) => t.bossState === 'fighting') ?? null;
   }
 
+  get fortress() {
+    return this.territories.find((t) => t.def.requires)!;
+  }
+
   isLiberated(t: Territory) {
     return this.leaders.has(t.def.leader.id);
   }
 
-  get leadersDefeated() {
-    return this.territories.filter((t) => this.isLiberated(t)).length;
+  /** The land can be entered at all (the fortress needs the three army leaders dead). */
+  isOpen(t: Territory) {
+    return (t.def.requires ?? []).every((id) => this.leaders.has(id));
+  }
+
+  /** Every outpost in the land is taken, so the leader's gate opens. */
+  arenaOpen(t: Territory) {
+    return this.isOpen(t) && t.outposts.every((o) => o.phase === 'captured');
+  }
+
+  get armyLeadersDefeated() {
+    return ARMY_LEADERS.filter((id) => this.leaders.has(id)).length;
+  }
+
+  get victorious() {
+    return this.isLiberated(this.fortress);
   }
 
   /** Rebuilds the world from a save (also used when respawning after death). */
@@ -159,18 +194,10 @@ export class Campaign {
     this.camp.unlocked = true;
     this.camp.banner.setRaised(true);
     for (const t of this.territories) {
-      t.gate.unlocked = true;
-      t.gate.banner.setRaised(true);
-      for (const o of t.outposts) {
-        o.captured = captured.has(o.def.id);
-        o.group.alerted = false;
-        o.checkpoint.unlocked = o.captured;
-        o.checkpoint.banner.setRaised(o.captured);
-        o.group.members.forEach((e, i) => {
-          if (o.captured) e.makeDormant();
-          else e.spawn(o.def.x + o.def.spawns[i][1], o.def.z + o.def.spawns[i][2]);
-        });
-      }
+      const open = this.isOpen(t);
+      t.gate.unlocked = open;
+      t.gate.banner.setRaised(open);
+      for (const o of t.outposts) this.resetOutpost(o, captured.has(o.def.id), open);
       t.patrol.alerted = false;
       t.patrolLeg = 0;
       t.patrolRespawn = 0;
@@ -183,13 +210,18 @@ export class Campaign {
       if (this.isLiberated(t)) {
         t.leader.makeDormant();
         t.bossState = 'defeated';
-      } else {
+      } else if (open) {
         t.leader.spawn(t.def.throne.x, t.def.throne.z);
-        t.bossState = 'waiting';
+        t.bossState = this.arenaOpen(t) ? 'waiting' : 'sealed';
+      } else {
+        t.leader.makeDormant();
+        t.bossState = 'sealed';
       }
-      this.world.gates[t.def.id].open();
+      if (t.bossState === 'sealed') this.world.gates[t.def.id].close();
+      else this.world.gates[t.def.id].open();
       t.victoryTimer = -1;
     }
+    this.world.seal.set(!this.isOpen(this.fortress));
 
     this.current = this.checkpoints.find((c) => c.id === save?.checkpoint && c.unlocked) ?? this.camp;
     // The hero respawns beside this banner; don't re-trigger it (or a land's welcome) immediately.
@@ -198,11 +230,23 @@ export class Campaign {
     this.inLand = this.territories.find((t) => territoryWeight(t.def, b.x, b.z) > 0.5)?.def.id ?? null;
   }
 
+  private resetOutpost(o: Outpost, captured: boolean, open: boolean) {
+    o.phase = captured ? 'captured' : 'garrison';
+    o.group.alerted = false;
+    o.checkpoint.unlocked = captured;
+    o.checkpoint.banner.setRaised(captured);
+    for (const e of o.wave) e.makeDormant();
+    o.garrison.forEach((e, i) => {
+      if (captured || !open) e.makeDormant();
+      else e.spawn(o.def.x + o.def.spawns[i][1], o.def.z + o.def.spawns[i][2]);
+    });
+  }
+
   /** What the save file needs from the campaign. */
   saveFields(): Pick<SaveData, 'checkpoint' | 'captured' | 'leaders'> {
     return {
       checkpoint: this.current.id,
-      captured: this.outposts.filter((o) => o.captured).map((o) => o.def.id),
+      captured: this.outposts.filter((o) => o.phase === 'captured').map((o) => o.def.id),
       leaders: [...this.leaders],
     };
   }
@@ -226,9 +270,14 @@ export class Campaign {
     }
 
     for (const t of this.territories) {
+      if (!this.isOpen(t)) continue;
       for (const o of t.outposts) {
-        if (!o.captured && o.group.cleared) this.capture(o);
+        if (o.phase !== 'captured' && o.group.cleared) {
+          if (o.phase === 'garrison') this.counterattack(o, ctx);
+          else this.capture(t, o);
+        }
       }
+
       // Crossing into this land from outside brings fresh soldiers.
       const w = territoryWeight(t.def, player.pos.x, player.pos.z);
       if (player.alive && w > 0.5 && this.inLand !== t.def.id && !this.activeFight) {
@@ -237,6 +286,7 @@ export class Campaign {
       } else if (this.inLand === t.def.id && w < 0.2) {
         this.inLand = null;
       }
+
       if (!this.isLiberated(t)) this.updatePatrol(t, dt);
 
       const arena = this.centers.get(t.def.id)!;
@@ -246,10 +296,7 @@ export class Campaign {
       if (t.bossState === 'fighting' && !t.leader.alive) this.endBossFight(t, ctx);
       if (t.victoryTimer >= 0) {
         t.victoryTimer -= dt;
-        if (t.victoryTimer < 0) {
-          const left = TERRITORIES.length - this.leadersDefeated;
-          this.events.announce(t.def.liberatedTitle, left > 0 ? `${left} ${left === 1 ? 'army remains' : 'armies remain'}` : "Zomawi's fortress stirs...");
-        }
+        if (t.victoryTimer < 0) this.afterVictory(t);
       }
     }
   }
@@ -286,29 +333,32 @@ export class Campaign {
 
   /**
    * Where the hero should head next: the land they're standing in if it's
-   * still held by the enemy, otherwise the one with the lowest recommended
-   * level. Within a land: outposts first, then the leader.
+   * still held by the enemy, otherwise the open land with the lowest
+   * recommended level. Within a land: outposts first, then the leader.
    */
   objective(from: THREE.Vector3, heroLevel: number): Objective {
-    const open = this.territories.filter((t) => !this.isLiberated(t));
-    if (open.length === 0) {
-      return { text: "All three armies are broken. Zomawi's fortress awaits (coming soon).", at: null };
-    }
+    const open = this.territories.filter((t) => this.isOpen(t) && !this.isLiberated(t));
+    if (open.length === 0) return { text: 'The war is won. The lands are free.', at: null };
     const here = open.find((t) => territoryWeight(t.def, from.x, from.z) > 0.5);
     const t = here ?? open.reduce((a, b) => (b.def.recommendedLevel < a.def.recommendedLevel ? b : a));
     const advice = heroLevel < t.def.recommendedLevel ? ` (recommended level ${t.def.recommendedLevel})` : '';
-    const remaining = t.outposts.filter((o) => !o.captured);
+
+    const holding = t.outposts.find((o) => o.phase === 'counterattack');
+    if (holding) return { text: `Hold ${holding.def.name} against the counterattack!`, at: new THREE.Vector3(holding.def.x, 0, holding.def.z) };
+    const remaining = t.outposts.filter((o) => o.phase === 'garrison');
     if (remaining.length > 0) {
       const dist = (o: Outpost) => Math.hypot(o.def.x - from.x, o.def.z - from.z);
       const next = remaining.reduce((a, b) => (dist(b) < dist(a) ? b : a));
-      return { text: `Capture ${next.def.name}${advice}`, at: new THREE.Vector3(next.def.x, 0, next.def.z) };
+      const left = remaining.length === 1 ? 'the last outpost' : `${remaining.length} outposts left`;
+      const verb = t.def.requires ? 'Storm' : 'Capture';
+      return { text: `${verb} ${next.def.name} (${left})${advice}`, at: new THREE.Vector3(next.def.x, 0, next.def.z) };
     }
     return { text: `Defeat ${t.def.leader.title}${advice}`, at: this.centers.get(t.def.id)!.clone() };
   }
 
   /** 0..1 gloom per land at a position for the sky and fog. Lifts once its leader falls. */
   gloomAt(pos: THREE.Vector3): Record<TerritoryId, number> {
-    const out = { zombie: 0, witch: 0, vampire: 0 };
+    const out = { zombie: 0, witch: 0, vampire: 0, fortress: 0 };
     for (const t of this.territories) out[t.def.id] = territoryWeight(t.def, pos.x, pos.z) * (this.isLiberated(t) ? 0.25 : 1);
     return out;
   }
@@ -320,17 +370,41 @@ export class Campaign {
     this.events.announce(title, detail);
   }
 
-  private capture(o: Outpost) {
-    o.captured = true;
+  /** The garrison has fallen; the enemy sends a counterattack to retake the outpost. */
+  private counterattack(o: Outpost, ctx: GameContext) {
+    o.phase = 'counterattack';
+    o.group.alerted = true;
+    o.wave.forEach((e, i) => {
+      // They arrive from all sides at the edge of the clearing.
+      const a = (i / o.wave.length) * Math.PI * 2 + Math.random() * 0.6;
+      const r = o.def.flatRadius - 2;
+      const x = o.def.x + Math.sin(a) * r;
+      const z = o.def.z + Math.cos(a) * r;
+      const fromGround = e.faction !== 'witch';
+      e.spawn(x, z, fromGround);
+      if (!fromGround) ctx.particles.burst(new THREE.Vector3(x, e.pos.y + 1.4, z), 0x6a4a8a, 20, 4);
+    });
+    sfx.roar();
+    this.events.announce('Counterattack!', `Hold ${o.def.name}`);
+  }
+
+  private capture(t: Territory, o: Outpost) {
+    o.phase = 'captured';
     o.checkpoint.unlocked = true;
     o.checkpoint.banner.setRaised(true, true);
     this.events.awardXp(OUTPOST_XP, new THREE.Vector3(o.def.x, 3, o.def.z));
     this.touching = o.checkpoint.id;
     this.activate(o.checkpoint, 'Outpost captured', `${o.def.name} · Game saved`);
+    if (this.arenaOpen(t) && t.bossState === 'sealed') {
+      t.bossState = 'waiting';
+      this.world.gates[t.def.id].open();
+      sfx.roar();
+      this.events.announce(`The way to ${t.def.leader.title} is open`, `${t.def.gate.name} awaits`);
+    }
   }
 
   private spawnPatrol(t: Territory, rise: boolean) {
-    if (this.isLiberated(t)) {
+    if (this.isLiberated(t) || !this.isOpen(t)) {
       for (const e of t.patrol.members) e.makeDormant();
       return;
     }
@@ -343,6 +417,7 @@ export class Campaign {
   }
 
   private updatePatrol(t: Territory, dt: number) {
+    if (t.patrol.members.length === 0) return;
     if (t.patrol.cleared) {
       t.patrolRespawn += dt;
       if (t.patrolRespawn >= PATROL_RESPAWN && t.patrol.members.every((e) => e.readyToRespawn)) {
@@ -380,9 +455,9 @@ export class Campaign {
         a.reinforce(ctx.player.pos.x + (Math.random() - 0.5) * 3, ctx.player.pos.z + (Math.random() - 0.5) * 3);
       }
     }
-    if (t.def.id === 'zombie') sfx.roar();
-    else if (t.def.id === 'witch') sfx.cackle(1);
-    else sfx.bats(1);
+    if (t.def.id === 'witch') sfx.cackle(1);
+    else if (t.def.id === 'vampire') sfx.bats(1);
+    else sfx.roar();
     ctx.addShake(0.4);
     this.events.bossStarted(t.def.leader.title);
     this.events.say(t.def.leader.title, t.def.leader.introLine);
@@ -394,13 +469,37 @@ export class Campaign {
     this.leaders.add(t.def.leader.id);
     this.world.gates[t.def.id].open();
     ctx.projectiles.clear();
-    // With their leader gone, the rest of this army falls where it stands.
+    // With their leader gone, the rest of this army falls where it stands (all of them, for Zomawi).
     for (const e of ctx.enemies) {
-      if (e.alive && e.faction === t.leader.faction) e.collapse(ctx);
+      if (e.alive && (t.def.requires || e.faction === t.leader.faction)) e.collapse(ctx);
     }
     this.events.bossEnded();
     this.events.say(t.def.leader.title, t.def.leader.deathLine);
     t.victoryTimer = 3;
+    this.events.save();
+  }
+
+  private afterVictory(t: Territory) {
+    if (t.def.requires) {
+      this.events.victory();
+      return;
+    }
+    const left = ARMY_LEADERS.length - this.armyLeadersDefeated;
+    this.events.announce(t.def.liberatedTitle, left > 0 ? `${left} ${left === 1 ? 'army remains' : 'armies remain'}` : 'All three armies are broken');
+    const fortress = this.fortress;
+    if (left === 0 && fortress.bossState === 'sealed' && !this.isLiberated(fortress)) this.unsealFortress(fortress);
+  }
+
+  /** The three leaders are dead: Zomawi's seal breaks and the fortress garrison musters. */
+  private unsealFortress(t: Territory) {
+    this.world.seal.set(false);
+    t.gate.unlocked = true;
+    t.gate.banner.setRaised(true, true);
+    for (const o of t.outposts) this.resetOutpost(o, false, true);
+    t.leader.spawn(t.def.throne.x, t.def.throne.z);
+    t.bossState = 'sealed'; // until the courtyard falls
+    sfx.roar();
+    this.events.announce("Zomawi's seal is broken", 'The fortress lies open to the south');
     this.events.save();
   }
 }

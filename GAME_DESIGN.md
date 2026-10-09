@@ -128,11 +128,11 @@ A single fight that mixes all three natures at once:
 2. ✅ **Hero and HUD:** name entry, health/stamina/XP bars, leveling.
 3. ✅ **First territory:** zombie army, allied soldiers, checkpoints and saving, Zombie King fight. Also added: an Options screen with invert vertical look.
 4. ✅ **Remaining territories:** witch and vampire armies and their leaders. Recommended levels: Zombie Lands 1, Witch Lands 5, Vampire Lands 8.
-5. **Zomawi:** the fortress, the final fight, and the ending.
+5. ✅ **Zomawi:** the fortress, the final fight, and the ending. Also: 5 outposts per land with counterattack waves, and leader arenas sealed until a land's outposts are all captured.
 6. **Polish:** music, sound effects, balancing, title screen.
 
 ## Open questions (defaults are used until decided)
 
 - Leader names: currently "The Zombie King", "The Witch Queen", and "The Vampire Lord". They can be renamed in `src/layout.ts`.
 - Can the hero be customized beyond the name, for example armor color?
-- Zomawi's appearance and backstory.
+- Zomawi's appearance and backstory. Current version: once a general of the human army, raised as a zombie and bound with witchcraft. Half armored knight, half rotting zombie, in a witch's cloak and crowned hat, with a greatsword.

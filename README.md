@@ -36,6 +36,13 @@ Options are saved in the browser, so each player keeps their own on their own de
 
 Your squad heals between fights. When you enter an enemy land, fallen soldiers are replaced and the rest are healed to full.
 
+## How the war goes
+
+1. Each enemy land (Zombie, Witch, Vampire) has **five outposts**. Clearing an outpost's garrison brings a **counterattack**; survive it and the outpost is yours.
+2. A land's leader waits behind a **sealed gate** that opens only when all five of its outposts are captured.
+3. When all three leaders are dead, the seal on **Zomawi's fortress** in the far south breaks. Storm the courtyard, then face Zomawi in the sanctum.
+4. Defeat Zomawi to see the ending. Afterwards you can keep exploring the liberated world.
+
 ## Saving
 
 Touching a standing red banner makes it your checkpoint: it saves the game, restores your health and replaces fallen soldiers. Capturing an outpost raises a new banner there. If you die, you return to your last checkpoint and lose any XP earned since.
@@ -61,6 +68,7 @@ Open http://localhost:5173/?test to skip the menus and play without pointer lock
 | `src/zombieKing.ts` | The Zombie King: ground pound, summons, enrage |
 | `src/witchQueen.ts` | The Witch Queen: flight, meteor rain, exhaustion, mirror images |
 | `src/vampireLord.ts` | The Vampire Lord: combos, parries, life-drain grab, bat form |
+| `src/zomawi.ts` | Zomawi, the final boss: human, zombie and witch powers at once |
 | `src/projectiles.ts` | Fire bolts, hex orbs and meteors |
 | `src/character.ts` | Blocky humanoid model and pose helpers |
 | `src/camera.ts` | Over-the-shoulder camera, screen shake, invert look |

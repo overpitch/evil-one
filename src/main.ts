@@ -60,6 +60,9 @@ let hitStopTimer = 0;
 let deathShown = false;
 let menuOrbit = 0;
 let pendingName = '';
+/** Seconds of play (only counts while actually playing). */
+let playTime = 0;
+let endingShown = false;
 
 const ctx: GameContext = {
   scene,
@@ -107,6 +110,10 @@ const campaign = new Campaign(scene, world, enemies, {
   },
   bossStarted: (name) => hud.showBoss(name),
   bossEnded: () => hud.showBoss(null),
+  victory: () => {
+    saveGame();
+    setTimeout(showEnding, 2500);
+  },
   save: () => saveGame(),
 });
 
@@ -128,6 +135,7 @@ function saveGame() {
     level: player.level,
     xp: player.xp,
     kills,
+    playTime: Math.round(playTime),
     ...campaign.saveFields(),
     savedAt: Date.now(),
   });
@@ -148,6 +156,8 @@ function reinforceSquad(everyone = false) {
 function enterWorld(save: SaveData) {
   player.loadHero(save.name, save.level, save.xp);
   kills = save.kills;
+  playTime = save.playTime ?? 0;
+  endingShown = false;
   campaign.load(save);
   const spot = respawnPoint(campaign.current.banner);
   player.reset(spot.x, spot.z);
@@ -213,15 +223,16 @@ function mapData(objective: Objective): MapData {
     player: { x: player.pos.x, z: player.pos.z, yaw: player.yaw },
     heroLevel: player.level,
     allies: allies.filter((a) => a.alive).map((a) => ({ x: a.pos.x, z: a.pos.z })),
-    outposts: campaign.outposts.map((o) => ({ x: o.def.x, z: o.def.z, name: o.def.name, captured: o.captured })),
+    outposts: campaign.territories
+      .filter((t) => campaign.isOpen(t))
+      .flatMap((t) => t.outposts)
+      .map((o) => ({ x: o.def.x, z: o.def.z, name: o.def.name, captured: o.phase === 'captured' })),
     checkpoints: campaign.checkpoints
       .filter((c) => c.unlocked)
       .map((c) => ({ x: c.banner.x, z: c.banner.z, current: c === campaign.current })),
-    liberated: {
-      zombie: campaign.isLiberated(campaign.territories[0]),
-      witch: campaign.isLiberated(campaign.territories[1]),
-      vampire: campaign.isLiberated(campaign.territories[2]),
-    },
+    liberated: Object.fromEntries(campaign.territories.map((t) => [t.def.id, campaign.isLiberated(t)])) as MapData['liberated'],
+    open: Object.fromEntries(campaign.territories.map((t) => [t.def.id, campaign.isOpen(t)])) as MapData['open'],
+    armyLeadersDefeated: campaign.armyLeadersDefeated,
     objective: objective.at ? { x: objective.at.x, z: objective.at.z } : null,
   };
 }
@@ -274,7 +285,38 @@ hud.onSettings = (s) => {
 };
 input.onLockChange = (locked) => {
   if (!locked) hud.showMap(false);
-  if (phase === 'playing' && !hud.optionsOpen) hud.showPause(!locked && player.alive);
+  if (phase === 'playing' && !hud.optionsOpen && !endingShown) hud.showPause(!locked && player.alive);
+};
+
+/** The war is won: release the mouse and roll the ending. */
+function showEnding() {
+  endingShown = true;
+  hud.showMap(false);
+  hud.showPause(false);
+  if (document.pointerLockElement) document.exitPointerLock();
+  hud.showEnding({
+    name: player.name,
+    level: player.level,
+    kills,
+    playSeconds: playTime,
+    difficulty: DIFFICULTIES[loadSettings().difficulty].label,
+  });
+}
+
+hud.onKeepExploring = () => {
+  endingShown = false;
+  hud.showScreen('none');
+  lockPointer();
+};
+hud.onEndingTitle = () => {
+  endingShown = false;
+  phase = 'menu';
+  ctx.peaceful = true;
+  hud.showBoss(null);
+  const spot = respawnPoint(CAMP_BANNER);
+  player.reset(spot.x, spot.z);
+  reinforceSquad(true);
+  hud.showTitle(loadSave());
 };
 
 window.addEventListener('resize', () => {
@@ -314,7 +356,8 @@ function tick(realDt: number) {
     for (const a of allies) a.update(realDt, ctx);
     updateMenuCamera(realDt);
   } else {
-    if (input.locked || testMode) {
+    if ((input.locked || testMode) && !endingShown) {
+      playTime += realDt;
       if (input.wasPressed('KeyM')) hud.showMap(!hud.mapOpen);
       camCtrl.applyInput(input);
       let dt = realDt;

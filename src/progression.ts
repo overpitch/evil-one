@@ -1,9 +1,10 @@
 import type { EnemyKind, LeaderId } from './layout';
 
 /**
- * XP and level curve. Tuned so a full playthrough ends around level 10:
- * each territory is worth roughly 1,400 XP, and the recommended levels are
- * Zombie Lands 1, Witch Lands 5, Vampire Lands 8.
+ * XP and level curve. Each enemy land (five outposts with counterattack
+ * waves, a patrol and a leader) is worth roughly 2,500 XP, so the hero
+ * reaches about level 5 after the Zombie Lands, 8 after the Witch Lands and
+ * 10-11 by Zomawi's fortress.
  */
 export const MAX_LEVEL = 20;
 
@@ -14,7 +15,7 @@ export const PER_LEVEL = {
   damage: 0.08,
 };
 
-export const xpToNext = (level: number) => 80 + 60 * (level - 1);
+export const xpToNext = (level: number) => 250 + 120 * (level - 1);
 
 export function statsForLevel(level: number) {
   const n = level - 1;
@@ -38,6 +39,7 @@ export const XP_REWARD: Record<EnemyKind | LeaderId, number> = {
   'zombie-king': 400,
   'witch-queen': 500,
   'vampire-lord': 600,
+  zomawi: 1500,
 };
 
 /** Bonus XP for capturing an outpost. */

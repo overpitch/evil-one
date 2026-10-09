@@ -1,4 +1,4 @@
-import { HUMAN_CAMP, TERRITORIES, ZOMAWI_FORTRESS, type TerritoryId } from './layout';
+import { HUMAN_CAMP, TERRITORIES, type TerritoryId } from './layout';
 import { WORLD_HALF } from './world';
 
 export interface MapData {
@@ -8,6 +8,9 @@ export interface MapData {
   outposts: { x: number; z: number; name: string; captured: boolean }[];
   checkpoints: { x: number; z: number; current: boolean }[];
   liberated: Record<TerritoryId, boolean>;
+  /** Lands that can be entered (the fortress is sealed until the three leaders fall). */
+  open: Record<TerritoryId, boolean>;
+  armyLeadersDefeated: number;
   objective: { x: number; z: number } | null;
 }
 
@@ -16,9 +19,10 @@ const REGION_FILL: Record<TerritoryId, [string, string]> = {
   zombie: ['rgba(95, 100, 55, 0.75)', 'rgba(110, 120, 70, 0.4)'],
   witch: ['rgba(80, 55, 110, 0.75)', 'rgba(90, 75, 120, 0.4)'],
   vampire: ['rgba(100, 30, 45, 0.75)', 'rgba(110, 60, 70, 0.4)'],
+  fortress: ['rgba(40, 12, 16, 0.8)', 'rgba(70, 50, 50, 0.4)'],
 };
 
-const LEADER_ICON: Record<TerritoryId, string> = { zombie: '♛', witch: '✦', vampire: '♜' };
+const LEADER_ICON: Record<TerritoryId, string> = { zombie: '♛', witch: '✦', vampire: '♜', fortress: '☬' };
 
 /**
  * Draws the world map, north up. The world's +Z is north and -X is east,
@@ -51,15 +55,13 @@ export function drawMap(canvas: HTMLCanvasElement, data: MapData) {
     }
   };
 
-  let defeated = 0;
   for (const t of TERRITORIES) {
     const free = data.liberated[t.id];
-    if (free) defeated++;
-    const sub = free ? 'Liberated' : `Recommended level ${t.recommendedLevel}${data.heroLevel < t.recommendedLevel ? ' ⚠' : ''}`;
-    // Zombie Lands' label goes below so it doesn't cover the crypt.
+    const level = `Recommended level ${t.recommendedLevel}${data.heroLevel < t.recommendedLevel ? ' ⚠' : ''}`;
+    const sub = free ? 'Liberated' : !data.open[t.id] ? `Sealed · ${data.armyLeadersDefeated} of 3 leaders defeated` : level;
+    // Labels go below the region when its arena sits at the top of it.
     region(t.center.x, t.center.z, t.center.r, REGION_FILL[t.id][free ? 1 : 0], t.name, sub, t.id === 'zombie');
   }
-  region(ZOMAWI_FORTRESS.x, ZOMAWI_FORTRESS.z, ZOMAWI_FORTRESS.r, 'rgba(20, 15, 20, 0.6)', "Zomawi's Fortress", `Sealed · ${defeated} of 3 leaders defeated`);
   region(HUMAN_CAMP.x, HUMAN_CAMP.z, 14, 'rgba(160, 120, 70, 0.6)', 'Human Camp');
 
   const icon = (x: number, z: number, glyph: string, color: string, px = size / 26) => {

@@ -168,6 +168,7 @@ const MOODS: Record<TerritoryId, Mood> = {
   zombie: { sky: new THREE.Color(0x7f8a7c), fogNear: 16, fogFar: 95, hemi: 1.05, sun: 1.4, sunColor: new THREE.Color(0xc9d6b8) },
   witch: { sky: new THREE.Color(0x6a5a82), fogNear: 14, fogFar: 85, hemi: 1.0, sun: 1.2, sunColor: new THREE.Color(0xd0b8f0) },
   vampire: { sky: new THREE.Color(0x262a44), fogNear: 18, fogFar: 100, hemi: 0.75, sun: 1.1, sunColor: new THREE.Color(0x9fb0ff) },
+  fortress: { sky: new THREE.Color(0x2e1416), fogNear: 12, fogFar: 85, hemi: 0.7, sun: 1.0, sunColor: new THREE.Color(0xff9a7a) },
 };
 
 export type World = ReturnType<typeof createWorld>;
@@ -208,13 +209,16 @@ export function createWorld(scene: THREE.Scene) {
   }
   const gates = {} as Record<TerritoryId, Gate>;
   for (const t of TERRITORIES) gates[t.id] = addArena(scene, rand, colliders, t);
+  const seal = addSeal(scene, TERRITORIES.find((t) => t.requires)!);
 
-  const gloom: Record<TerritoryId, number> = { zombie: 0, witch: 0, vampire: 0 };
+  const gloom: Record<TerritoryId, number> = { zombie: 0, witch: 0, vampire: 0, fortress: 0 };
   let time = 0;
 
   return {
     colliders,
     gates,
+    /** The dome of red light over Zomawi's arena while the fortress is sealed. */
+    seal,
     /**
      * Follows the player with the sun's shadow camera and blends the sky,
      * fog and light toward each enemy land's mood.
@@ -259,6 +263,7 @@ export function createWorld(scene: THREE.Scene) {
       sun.intensity = sunI / norm;
 
       for (const a of animated) a(time);
+      seal.update(time);
     },
   };
 }
@@ -270,8 +275,9 @@ const GROUND_COLORS: Record<TerritoryId, [number, number, number]> = {
   zombie: [0x6e6a42, 0x857b4c, 0x4e4232],
   witch: [0x3e5a48, 0x4d6650, 0x4a3a5a],
   vampire: [0x3e3a3c, 0x4a4446, 0x4a2a2e],
+  fortress: [0x2e2a2a, 0x3a3434, 0x4a1a1a], // ash and old blood
 };
-const ARENA_FLOOR: Record<TerritoryId, number> = { zombie: 0x48433b, witch: 0x2f3a2e, vampire: 0x55505c };
+const ARENA_FLOOR: Record<TerritoryId, number> = { zombie: 0x48433b, witch: 0x2f3a2e, vampire: 0x55505c, fortress: 0x2a2228 };
 
 function createGround(rand: () => number) {
   let geo: THREE.BufferGeometry = new THREE.PlaneGeometry(WORLD_HALF * 2, WORLD_HALF * 2, 150, 150);
@@ -375,7 +381,10 @@ function addTrees(scene: THREE.Scene, rand: () => number, colliders: Colliders) 
       counts.swamp++;
     } else if (weight > 0.5) {
       dead.setMatrixAt(counts.dead, m);
-      dead.setColorAt(counts.dead, id === 'vampire' ? c.setHSL(0.98, 0.15, 0.1 + rand() * 0.06) : c.setHSL(0.08, 0.12, 0.22 + rand() * 0.1));
+      dead.setColorAt(
+        counts.dead,
+        id === 'vampire' || id === 'fortress' ? c.setHSL(0.98, 0.15, 0.1 + rand() * 0.06) : c.setHSL(0.08, 0.12, 0.22 + rand() * 0.1),
+      );
       counts.dead++;
     } else {
       pineTrunk.setMatrixAt(counts.pine, m);
@@ -441,14 +450,19 @@ function spotIn(t: TerritoryDef, rand: () => number, colliders: Colliders, spaci
 function addGravestones(scene: THREE.Scene, rand: () => number, colliders: Colliders) {
   const zombie = TERRITORIES[0];
   const spots: [number, number][] = [];
-  // Neat rows around Gravedigger's Field, leaving the middle open for the fight.
-  const field = zombie.outposts.find((o) => o.decor === 'graves')!;
-  for (let row = -2; row <= 2; row++) {
-    for (let col = -4; col <= 4; col++) {
-      const x = field.x + col * 2.2 + (rand() - 0.5) * 0.4;
-      const z = field.z + row * 2.6 + (rand() - 0.5) * 0.4;
-      if (Math.hypot(x - field.x, z - field.z) < 6.5) continue;
-      spots.push([x, z]);
+  const dark = new Set<number>();
+  // Neat rows around graveyard outposts, leaving the middle open for the fight.
+  for (const t of TERRITORIES) {
+    for (const field of t.outposts.filter((o) => o.decor === 'graves')) {
+      for (let row = -2; row <= 2; row++) {
+        for (let col = -4; col <= 4; col++) {
+          const x = field.x + col * 2.2 + (rand() - 0.5) * 0.4;
+          const z = field.z + row * 2.6 + (rand() - 0.5) * 0.4;
+          if (Math.hypot(x - field.x, z - field.z) < 6.5) continue;
+          if (t.id !== 'zombie') dark.add(spots.length);
+          spots.push([x, z]);
+        }
+      }
     }
   }
   for (let tries = 0; spots.length < 110 && tries < 3000; tries++) {
@@ -467,7 +481,7 @@ function addGravestones(scene: THREE.Scene, rand: () => number, colliders: Colli
     const sc = 0.8 + rand() * 0.5;
     m.compose(p.set(x, heightAt(x, z), z), q.setFromEuler(e.set((rand() - 0.5) * 0.35, (rand() - 0.5) * 0.4, (rand() - 0.5) * 0.3)), s.set(sc, sc, sc));
     slabs.setMatrixAt(i, m);
-    slabs.setColorAt(i, c.setHSL(0.1, 0.04, 0.38 + rand() * 0.18));
+    slabs.setColorAt(i, dark.has(i) ? c.setHSL(0.75, 0.06, 0.2 + rand() * 0.1) : c.setHSL(0.1, 0.04, 0.38 + rand() * 0.18));
     colliders.circles.push({ x, z, r: 0.3 });
   });
   slabs.castShadow = true;
@@ -717,6 +731,28 @@ function addOutpostDecor(scene: THREE.Scene, rand: () => number, colliders: Coll
       }
       return null;
     }
+    case 'spikes': {
+      // Iron stakes and burning braziers before Zomawi's gate.
+      const iron = lambert(0x2a2628);
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2;
+        if (Math.abs(Math.sin(a)) < 0.3) continue; // keep the road north-south clear
+        const x = o.x + Math.sin(a) * 11;
+        const z = o.z + Math.cos(a) * 11;
+        const stake = place(scene, new THREE.ConeGeometry(0.18, 2.6, 4).translate(0, 1.3, 0), iron, x, z);
+        stake.rotation.z = Math.sin(a) * 0.25;
+        colliders.circles.push({ x, z, r: 0.3 });
+      }
+      const flames: THREE.Mesh[] = [];
+      for (const [bx, bz] of [[-6, 6], [6, 6], [-6, -6], [6, -6]] as [number, number][]) {
+        const x = o.x + bx;
+        const z = o.z + bz;
+        place(scene, new THREE.CylinderGeometry(0.55, 0.3, 1.1, 7).translate(0, 0.55, 0), iron, x, z);
+        flames.push(place(scene, new THREE.ConeGeometry(0.45, 1, 6).translate(0, 0.5, 0), new THREE.MeshBasicMaterial({ color: 0xff5a2a }), x, z, 1.1));
+        colliders.circles.push({ x, z, r: 0.6 });
+      }
+      return (time) => flames.forEach((f, i) => f.scale.set(1, 1 + Math.sin(time * 15 + i * 2) * 0.15, 1));
+    }
     default:
       return null;
   }
@@ -792,6 +828,8 @@ const ARENA_STYLES: Record<TerritoryId, ArenaStyle> = {
   witch: { pillar: new THREE.BoxGeometry(1.2, 4.4, 0.8), pillarColor: 0x56605a, wallColor: 0x24301f, wallHeight: 1.8, barColor: 0x3a2a4a },
   // A castle courtyard: tall walls and square towers.
   vampire: { pillar: new THREE.BoxGeometry(1.6, 5.2, 1.6), pillarColor: 0x3e3a48, wallColor: 0x4e4a58, wallHeight: 3.4, barColor: 0x1e1a22 },
+  // Black obsidian and iron.
+  fortress: { pillar: new THREE.BoxGeometry(1.8, 6.5, 1.8), pillarColor: 0x1a161e, wallColor: 0x2a2630, wallHeight: 3.8, barColor: 0x6a1a2a },
 };
 
 /**
@@ -920,6 +958,47 @@ function addArenaLandmark(scene: THREE.Scene, colliders: Colliders, t: Territory
     hollow.position.set(0, 2, -1.75);
     group.add(hollow);
     colliders.circles.push({ x: bx, z: bz, r: 2.4 });
+  } else if (t.id === 'fortress') {
+    // Zomawi's black spire with a burning crystal at its tip...
+    const obsidian = lambert(0x16121a);
+    const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 3, 24, 6), obsidian);
+    spire.position.y = 12;
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(1.4, 0), new THREE.MeshBasicMaterial({ color: 0xff3a2a }));
+    crystal.position.y = 25.5;
+    crystal.scale.y = 1.6;
+    group.add(spire, crystal);
+    for (const side of [-1, 1]) {
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.9, 9, 5), obsidian);
+      horn.position.set(side * 3.5, 5, 0);
+      horn.rotation.z = -side * 0.35;
+      group.add(horn);
+    }
+    colliders.circles.push({ x: bx, z: bz, r: 3 });
+    // ...a throne inside the arena...
+    const tx = t.throne.x + dirX(back) * 2.5;
+    const tz = t.throne.z + dirZ(back) * 2.5;
+    const throne = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(3, 1.4, 2), obsidian);
+    seat.position.y = 0.7;
+    const backrest = new THREE.Mesh(new THREE.BoxGeometry(3, 5, 0.6), obsidian);
+    backrest.position.set(0, 2.5, 0.7);
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.4, 0), new THREE.MeshBasicMaterial({ color: 0xff3a2a }));
+    gem.position.set(0, 4.4, 0.35);
+    throne.add(seat, backrest, gem);
+    throne.position.set(tx, heightAt(tx, tz), tz);
+    throne.rotation.y = facing;
+    throne.traverse((o) => (o.castShadow = true));
+    scene.add(throne);
+    colliders.circles.push({ x: tx, z: tz, r: 1.6 });
+    // ...and watchtowers flanking the arena.
+    const towerMat = lambert(0x2a2630);
+    for (const side of [-1, 1]) {
+      const wx = ax + side * (r + 5);
+      const wz = az + 4;
+      place(scene, new THREE.CylinderGeometry(2.2, 2.6, 14, 8).translate(0, 7, 0), towerMat, wx, wz);
+      place(scene, new THREE.ConeGeometry(2.8, 4, 8).translate(0, 2, 0), lambert(0x3a0a12), wx, wz, 14);
+      colliders.circles.push({ x: wx, z: wz, r: 2.6 });
+    }
   } else {
     // Castle Nightspire's keep: a tall hall flanked by towers.
     const stone = lambert(0x3e3a48);
@@ -947,6 +1026,22 @@ function addArenaLandmark(scene: THREE.Scene, colliders: Colliders, t: Territory
   }
   group.traverse((o) => (o.castShadow = true));
   scene.add(group);
+}
+
+/** A shimmering dome over a sealed arena. */
+function addSeal(scene: THREE.Scene, t: TerritoryDef) {
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff2a3a, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide });
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(t.arena.r + 2, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), mat);
+  dome.position.set(t.arena.x, heightAt(t.arena.x, t.arena.z) - 0.5, t.arena.z);
+  scene.add(dome);
+  return {
+    set(sealed: boolean) {
+      dome.visible = sealed;
+    },
+    update(time: number) {
+      mat.opacity = 0.14 + Math.sin(time * 1.5) * 0.05;
+    },
+  };
 }
 
 /** Where the hero stands after respawning at a banner: just beside it. */
