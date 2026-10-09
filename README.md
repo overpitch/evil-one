@@ -81,6 +81,7 @@ Touching a standing red banner makes it your checkpoint: it saves the game, rest
 Add these to the end of the game's address:
 
 - **`?probe`**: a tiny test page (one spinning shape and a timer). If a browser closes even this, the problem is the device or its settings, not the game.
+- **`?padtest`**: a controller test page that shows, in large text, everything the browser passes on from the controller: buttons, sticks, key presses, clicks, cursor movement, scrolling and Back.
 - **`?stats`**: shows frame rate, work per frame, draw calls, memory, resolution, graphics quality, running time, and the controller's stick readings and any held keys in the corner.
 - **`?lite`**: forces Low graphics for that visit without changing saved Options. On Xbox, Low is chosen automatically the first time. It turns off shadows and edge smoothing, renders at reduced resolution, and simulates fewer distant enemies.
 

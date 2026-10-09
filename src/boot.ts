@@ -1,4 +1,9 @@
-// Loads the game, or with ?probe a tiny test page for checking whether a
-// device's browser can keep a simple 3D page running.
-if (new URLSearchParams(location.search).has('probe')) void import('./probe');
+// Loads the game, or a diagnostic page:
+//   ?probe   — the lightest 3D page with a timer (can the device keep 3D running?)
+//   ?padtest — shows everything the controller sends (how does this browser handle it?)
+const params = new URLSearchParams(location.search);
+if (params.has('probe')) void import('./probe');
+else if (params.has('padtest')) void import('./padtest');
 else void import('./main');
+
+export {};

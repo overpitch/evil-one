@@ -132,7 +132,9 @@ export class Input {
     });
     for (const i of this.padDown) if (!previous.has(i)) this.padPressed.add(i);
     this.axes = [0, 1, 2, 3].map((i) => deadzone(pad.axes[i] ?? 0));
-    if (this.padPressed.size > 0 || this.axes.some((a) => Math.abs(a) > 0.3)) {
+    // While a browser is steering a cursor with the controller (Edge on Xbox in browser
+    // mode), the buttons belong to the browser: don't switch the menus to controller mode.
+    if ((this.padPressed.size > 0 || this.axes.some((a) => Math.abs(a) > 0.3)) && !this.cursorActive) {
       // Taking over from the keyboard: forget any keys that look held (a release may have been missed).
       if (!this.padActive) this.down.clear();
       this.mode = 'gamepad';
@@ -174,6 +176,11 @@ export class Input {
 
   padWasPressed(...buttons: number[]) {
     return buttons.some((b) => this.padPressed.has(b));
+  }
+
+  /** A mouse pointer (or a browser's controller cursor) moved in the last moment, while not captured. */
+  get cursorActive() {
+    return !this.locked && performance.now() - this.lastMouseMove < 1500;
   }
 
   /** The controller has been used in the last few seconds (keyboard movement is ignored meanwhile). */

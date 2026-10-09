@@ -31,7 +31,8 @@ export class MenuNavigator {
   }
 
   update(input: Input) {
-    if (input.mode !== 'gamepad') {
+    // Pointing with a cursor (mouse, or Edge on Xbox in browser mode): clicks do the work.
+    if (input.mode !== 'gamepad' || input.cursorActive) {
       this.setFocus(null);
       return;
     }

@@ -500,7 +500,6 @@ let xboxTipTimer = 0;
 window.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
 
 if (IS_XBOX) {
-  input.mode = 'gamepad';
   // Edge on Xbox maps the controller's B button to browser Back. Keep an extra
   // history entry on top so Back stays on the game. Browsers ignore entries
   // added without a click or key press, so it's (re)armed on real input.
