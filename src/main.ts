@@ -556,6 +556,7 @@ function updateStats(now: number, workMs: number) {
     `${renderer.domElement.width}×${renderer.domElement.height}`,
     `${settings.graphics === 'low' || startedLow ? 'low' : 'high'}`,
     `up ${Math.floor(up / 60)}:${String(up % 60).padStart(2, '0')}`,
+    input.debugText(),
   ].join(' · ');
   statFrames = 0;
   statWork = 0;

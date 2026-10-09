@@ -1,3 +1,5 @@
+import { IS_XBOX } from './settings';
+
 /** Keys the browser should never act on while playing (e.g. Space scrolling the page). */
 const GAME_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyK', 'KeyJ', 'KeyE', 'KeyM',
@@ -49,7 +51,7 @@ export class Input {
   /** When the mouse (or a console browser's controller cursor) last moved, in ms. */
   lastMouseMove = 0;
   /** When the game last received real controller input, in ms. */
-  lastPadInput = 0;
+  lastPadInput = -Infinity;
   onLockChange?: (locked: boolean) => void;
 
   private readonly down = new Set<string>();
@@ -68,10 +70,13 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       // Let text fields (hero name) receive every key.
       if (e.target instanceof HTMLInputElement && e.target.type === 'text') return;
+      // Console browsers turn the controller into arrow/"Gamepad" key presses while in
+      // browser mode, and may never send the matching release: don't treat them as keys.
+      if (e.key.startsWith('Gamepad') || (IS_XBOX && e.code.startsWith('Arrow'))) return;
       if (GAME_KEYS.has(e.code)) e.preventDefault();
       if (!e.repeat) this.pressed.add(e.code);
       this.down.add(e.code);
-      this.mode = 'mouse';
+      if (!IS_XBOX) this.mode = 'mouse';
     });
     window.addEventListener('keyup', (e) => this.down.delete(e.code));
     window.addEventListener('blur', () => this.down.clear());
@@ -128,6 +133,8 @@ export class Input {
     for (const i of this.padDown) if (!previous.has(i)) this.padPressed.add(i);
     this.axes = [0, 1, 2, 3].map((i) => deadzone(pad.axes[i] ?? 0));
     if (this.padPressed.size > 0 || this.axes.some((a) => Math.abs(a) > 0.3)) {
+      // Taking over from the keyboard: forget any keys that look held (a release may have been missed).
+      if (!this.padActive) this.down.clear();
       this.mode = 'gamepad';
       this.lastPadInput = performance.now();
     }
@@ -169,10 +176,20 @@ export class Input {
     return buttons.some((b) => this.padPressed.has(b));
   }
 
-  /** Movement intent: x = strafe right, z = forward, length up to 1. Keys and left stick combined. */
+  /** The controller has been used in the last few seconds (keyboard movement is ignored meanwhile). */
+  get padActive() {
+    return performance.now() - this.lastPadInput < 3000;
+  }
+
+  /** Keyboard keys, unless the controller is in charge. */
+  private key(...codes: string[]) {
+    return !this.padActive && this.isDown(...codes);
+  }
+
+  /** Movement intent: x = strafe right, z = forward, length up to 1. Keys or left stick. */
   moveVector() {
-    let x = (this.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (this.isDown('KeyA', 'ArrowLeft') ? 1 : 0) + this.axes[0];
-    let z = (this.isDown('KeyW', 'ArrowUp') ? 1 : 0) - (this.isDown('KeyS', 'ArrowDown') ? 1 : 0) - this.axes[1];
+    let x = (this.key('KeyD', 'ArrowRight') ? 1 : 0) - (this.key('KeyA', 'ArrowLeft') ? 1 : 0) + this.axes[0];
+    let z = (this.key('KeyW', 'ArrowUp') ? 1 : 0) - (this.key('KeyS', 'ArrowDown') ? 1 : 0) - this.axes[1];
     const len = Math.hypot(x, z);
     if (len > 1) {
       x /= len;
@@ -196,11 +213,18 @@ export class Input {
   }
 
   get blockHeld() {
-    return this.isDown('KeyQ', 'KeyK') || this.padIsDown(PAD.LT, PAD.LB);
+    return this.key('KeyQ', 'KeyK') || this.padIsDown(PAD.LT, PAD.LB);
   }
 
   get sprintHeld() {
-    return this.isDown('ShiftLeft', 'ShiftRight') || this.padIsDown(PAD.B, PAD.LS);
+    return this.key('ShiftLeft', 'ShiftRight') || this.padIsDown(PAD.B, PAD.LS);
+  }
+
+  /** For ?stats: what the controller and keyboard look like right now. */
+  debugText() {
+    const p = this.pad;
+    const raw = p ? Array.from(p.axes.slice(0, 4), (a) => a.toFixed(2)).join(' ') : 'none';
+    return `pad ${p ? p.mapping || 'non-standard' : 'none'} · sticks ${raw} · keys ${[...this.down].join(',') || 'none'}`;
   }
 
   get mapPressed() {
