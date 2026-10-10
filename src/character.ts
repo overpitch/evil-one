@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
  * Blocky low-poly humanoid built from boxes. Every limb hangs from a pivot
@@ -131,7 +132,60 @@ export function createHumanoid(look: HumanoidLook): Humanoid {
     part(sword, 0.08, 0.08, 0.07, gold, 0, 0, -0.13);
   }
 
-  return { root, hips, torso, head, armL, armR, legL, legR, sword, materials };
+  // Fewer draws: each body part's boxes become one mesh, colored per vertex.
+  const body = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, flatShading: true });
+  for (const g of [hips, torso, head, armL, armR, legL, legR, sword]) if (g) mergeParts(g, body);
+  return { root, hips, torso, head, armL, armR, legL, legR, sword, materials: [body] };
+}
+
+/**
+ * Merges a body part's plain-colored boxes into one vertex-colored mesh
+ * (glowing eyes stay separate so they still glow). Child groups (the sword)
+ * are left alone.
+ */
+function mergeParts(group: THREE.Group, material: THREE.Material) {
+  // Glowing eyes: both into one mesh, keeping their glow material.
+  const glows = group.children.filter((c): c is THREE.Mesh => c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial);
+  if (glows.length > 1) {
+    const geos = glows.map((m) => {
+      m.updateMatrix();
+      return m.geometry.clone().applyMatrix4(m.matrix);
+    });
+    const eyes = new THREE.Mesh(mergeGeometries(geos), glows[0].material);
+    for (const m of glows) group.remove(m);
+    group.add(eyes);
+  }
+  const boxes = group.children.filter(
+    (c): c is THREE.Mesh => c instanceof THREE.Mesh && c.material instanceof THREE.MeshLambertMaterial,
+  );
+  if (boxes.length < 2) {
+    if (boxes.length === 1) {
+      // Still use the shared vertex-colored material so the hit flash reaches it.
+      const geo = coloredGeometry(boxes[0]);
+      const mesh = new THREE.Mesh(geo, material);
+      mesh.castShadow = true;
+      group.remove(boxes[0]);
+      group.add(mesh);
+    }
+    return;
+  }
+  const merged = mergeGeometries(boxes.map(coloredGeometry));
+  for (const b of boxes) group.remove(b);
+  const mesh = new THREE.Mesh(merged, material);
+  mesh.castShadow = true;
+  group.add(mesh);
+}
+
+/** A box's geometry, moved into its parent's space and painted its material's color. */
+function coloredGeometry(mesh: THREE.Mesh) {
+  mesh.updateMatrix();
+  const geo = mesh.geometry.clone().applyMatrix4(mesh.matrix);
+  const color = (mesh.material as THREE.MeshLambertMaterial).color;
+  const n = geo.attributes.position.count;
+  const colors = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) color.toArray(colors, i * 3);
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geo;
 }
 
 const flashTmp = new THREE.Color();

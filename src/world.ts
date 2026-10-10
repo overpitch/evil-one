@@ -262,8 +262,52 @@ function place(scene: THREE.Scene, geo: THREE.BufferGeometry, mat: THREE.Materia
   mesh.rotation.y = rotY;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.userData.mergeable = true;
   scene.add(mesh);
   return mesh;
+}
+
+/** Size of the map squares static scenery is merged within (so whole squares can still be skipped when off-screen). */
+const MERGE_CELL = 60;
+
+/**
+ * Fewer draws for the Xbox: static scenery made with place() is merged,
+ * per map square and color, into one mesh each. Pieces that move or blink
+ * opt out by clearing `userData.mergeable`.
+ */
+function mergeStaticScenery(scene: THREE.Scene) {
+  const groups = new Map<string, THREE.Mesh[]>();
+  for (const obj of scene.children) {
+    if (!(obj instanceof THREE.Mesh) || !obj.userData.mergeable) continue;
+    const m = obj.material;
+    if (Array.isArray(m) || m.transparent) continue;
+    let kind: string;
+    if (m instanceof THREE.MeshLambertMaterial) kind = `l${m.color.getHex()}-${m.emissive.getHex()}`;
+    else if (m instanceof THREE.MeshBasicMaterial) kind = `b${m.color.getHex()}`;
+    else continue;
+    const cell = `${Math.floor(obj.position.x / MERGE_CELL)},${Math.floor(obj.position.z / MERGE_CELL)}`;
+    const key = `${kind}|${cell}|${obj.castShadow ? 1 : 0}${obj.receiveShadow ? 1 : 0}`;
+    let list = groups.get(key);
+    if (!list) groups.set(key, (list = []));
+    list.push(obj);
+  }
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const geos = list.map((mesh) => {
+      mesh.updateMatrix();
+      let geo = mesh.geometry.clone().applyMatrix4(mesh.matrix);
+      if (geo.index) geo = geo.toNonIndexed();
+      for (const name of Object.keys(geo.attributes)) if (name !== 'position' && name !== 'normal') geo.deleteAttribute(name);
+      return geo;
+    });
+    const merged = mergeGeometries(geos);
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, list[0].material);
+    mesh.castShadow = list[0].castShadow;
+    mesh.receiveShadow = list[0].receiveShadow;
+    for (const old of list) scene.remove(old);
+    scene.add(mesh);
+  }
 }
 
 // ---------- Atmosphere ----------
@@ -323,7 +367,11 @@ export function createWorld(scene: THREE.Scene) {
   }
   const gates = {} as Record<TerritoryId, Gate>;
   for (const t of TERRITORIES) gates[t.id] = addArena(scene, rand, colliders, t);
+  const beforeCastle = scene.children.length;
   animated.push(addGooCastle(scene, rand));
+  // The castle's stonework and goo don't move (only its bubbles do).
+  for (const o of scene.children.slice(beforeCastle)) if (o instanceof THREE.Mesh && !o.userData.bubble) o.userData.mergeable = true;
+  mergeStaticScenery(scene);
   const seal = addSeal(scene, TERRITORIES.find((t) => t.requires)!);
 
   const gloom: Record<TerritoryId, number> = { zombie: 0, witch: 0, vampire: 0, fortress: 0 };
@@ -783,6 +831,7 @@ function addOutpostDecor(scene: THREE.Scene, rand: () => number, colliders: Coll
       place(scene, new THREE.CylinderGeometry(0.85, 0.65, 0.9, 10).translate(0, 0.45, 0), lambert(0x1a1a1e), o.x, o.z + 0.5);
       const brew = place(scene, new THREE.CircleGeometry(0.75, 10).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x7aff6a }), o.x, o.z + 0.5, 0.86);
       colliders.circles.push({ x: o.x, z: o.z + 0.5, r: 0.95 });
+      brew.userData.mergeable = false; // it bubbles
       return (time) => brew.scale.setScalar(0.95 + Math.sin(time * 6) * 0.05);
     }
     case 'hangingWood': {
@@ -870,6 +919,7 @@ function addOutpostDecor(scene: THREE.Scene, rand: () => number, colliders: Coll
         flames.push(place(scene, new THREE.ConeGeometry(0.45, 1, 6).translate(0, 0.5, 0), new THREE.MeshBasicMaterial({ color: 0xff5a2a }), x, z, 1.1));
         colliders.circles.push({ x, z, r: 0.6 });
       }
+      for (const f of flames) f.userData.mergeable = false; // they flicker
       return (time) => flames.forEach((f, i) => f.scale.set(1, 1 + Math.sin(time * 15 + i * 2) * 0.15, 1));
     }
     default:
@@ -1117,6 +1167,7 @@ function addGooCastle(scene: THREE.Scene, rand: () => number) {
     const bz = cz + Math.cos(a) * d;
     if (!inGoo(bx, bz)) continue;
     const mesh = new THREE.Mesh(bubbleGeo, gooMat);
+    mesh.userData.bubble = true;
     mesh.position.set(bx, GOO_SURFACE, bz);
     scene.add(mesh);
     bubbles.push({ mesh, phase: rand(), speed: 0.3 + rand() * 0.4 });

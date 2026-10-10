@@ -900,6 +900,14 @@ function tick(realDt: number) {
   }
 
   world.update(ctx.leader.pos, realDt, campaign.gloomAt(ctx.leader.pos));
+  // Nothing past the fog can be seen, so don't draw it.
+  const far = (scene.fog as THREE.Fog).far + 15;
+  for (const c of [camera, camera2]) {
+    if (Math.abs(c.far - far) > 2) {
+      c.far = far;
+      c.updateProjectionMatrix();
+    }
+  }
   updateSound(realDt);
   updateXboxTip(realDt);
   // A live controller readout on the pause screen, for tracking down stuck sticks or keys.
