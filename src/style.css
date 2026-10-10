@@ -1012,3 +1012,24 @@ button.weapon-card.locked {
   color: #e9dcc0;
   text-shadow: 0 2px 4px #000;
 }
+
+/* Pause menu: five buttons, each sized to its label on one line; the row wraps when there isn't room. */
+#pause-screen .panel {
+  max-width: 760px;
+}
+
+#pause-screen .menu.row {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+#pause-screen .menu.row button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  letter-spacing: 1px;
+}
+
+#pause-screen #resume-btn {
+  font-size: 18px;
+  padding: 10px 24px;
+}
