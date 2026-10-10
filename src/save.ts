@@ -17,6 +17,8 @@ export interface SaveData {
   weapon?: string;
   /** Player 2's own weapons, kept between visits. */
   player2?: { weapons: string[]; weapon: string };
+  /** False between Zomawi's fall and the ending playing. */
+  endingSeen?: boolean;
   /** What the hero wears. */
   outfit?: Partial<import('./outfit').Outfit>;
   /** Gold, potions, armor and hired soldiers. */

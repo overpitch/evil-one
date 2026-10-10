@@ -64,8 +64,14 @@ export class Input {
   padIndex: number | null = null;
   /** Controller Player 1 leaves alone (Player 2's), or null. */
   exclude: number | null = null;
-  /** The controller that last gave this player input, or null if none has. */
+  /**
+   * Player 1's controller: the first one they use, kept until it disconnects
+   * (so touching another controller never takes Player 1's hero away; that
+   * controller pressing A brings in Player 2 instead). Player 2's is padIndex.
+   */
   lastPadIndex: number | null = null;
+  /** Waiting for Player 2 to press A: Player 1 doesn't pick up a new controller meanwhile. */
+  blockClaim = false;
 
   private pad: Gamepad | null = null;
   /**
@@ -142,14 +148,21 @@ export class Input {
   /** Reads the controller(s). Call once at the start of every frame. */
   poll(dt: number) {
     const all = navigator.getGamepads?.() ?? [];
-    // Player 2 uses their own controller. Player 1 uses every other one, so
-    // it doesn't matter which controller they pick up.
-    const pads: Gamepad[] = [];
+    // Player 2 uses their own controller; Player 1 uses the one they picked up first.
+    let pads: Gamepad[] = [];
     // Ignore odd devices (remotes, headsets) when a proper controller is connected.
     const anyStandard = [...all].some((p) => p?.connected && p.mapping === 'standard');
     for (const p of all) {
       if (!p?.connected || (anyStandard && p.mapping !== 'standard')) continue;
       if (this.padIndex !== null ? p.index === this.padIndex : p.index !== this.exclude) pads.push(p);
+    }
+    if (this.padIndex === null) {
+      const mine = pads.find((p) => p.index === this.lastPadIndex);
+      if (mine) pads = [mine];
+      else {
+        this.lastPadIndex = null; // it was unplugged (or never chosen)
+        if (this.blockClaim) pads = [];
+      }
     }
     const previous = this.padDown;
     this.padDown = new Set();
@@ -180,7 +193,7 @@ export class Input {
         if (Math.abs(v) > Math.abs(this.axes[i])) this.axes[i] = v;
         if (Math.abs(v) > 0.3) used = true;
       }
-      if (used) {
+      if (used && this.lastPadIndex === null) {
         this.lastPadIndex = pad.index;
         this.pad = pad;
       }

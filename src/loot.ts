@@ -62,11 +62,11 @@ export class WeaponDrops {
     }
   }
 
-  /** The nearest weapon still lying on the ground, for the objective marker. */
-  nearest(from: THREE.Vector3): { weapon: WeaponDef; at: THREE.Vector3 } | null {
+  /** The nearest weapon still lying on the ground (that `wanted` accepts), for the objective marker. */
+  nearest(from: THREE.Vector3, wanted: (w: WeaponDef) => boolean = () => true): { weapon: WeaponDef; at: THREE.Vector3 } | null {
     let best: Drop | null = null;
     for (const d of this.drops.values()) {
-      if (d.active && (!best || d.pos.distanceToSquared(from) < best.pos.distanceToSquared(from))) best = d;
+      if (d.active && wanted(d.weapon) && (!best || d.pos.distanceToSquared(from) < best.pos.distanceToSquared(from))) best = d;
     }
     return best ? { weapon: best.weapon, at: best.pos } : null;
   }

@@ -4,6 +4,7 @@ import type { Humanoid } from './character';
 import { VampireKnight, vampireLook } from './vampires';
 import type { GameContext, Target } from './types';
 import type { Player } from './player';
+import { CASTLE_PLATFORM_R } from './world';
 import { VAMPIRE_LAND } from './layout';
 import { XP_REWARD } from './progression';
 import { lerp } from './util';
@@ -220,7 +221,8 @@ export class VampireLord extends VampireKnight {
     let best = 0;
     for (let i = 0; i < 8; i++) {
       const a = Math.random() * Math.PI * 2;
-      const r = 4 + Math.random() * (ARENA.r - 6);
+      // On the goo castle's platform, not down in the goo.
+      const r = 3 + Math.random() * (CASTLE_PLATFORM_R - 4.5);
       const x = ARENA.x + Math.sin(a) * r;
       const z = ARENA.z + Math.cos(a) * r;
       const d = Math.hypot(x - player.pos.x, z - player.pos.z);

@@ -15,7 +15,7 @@ import { Music, type Mood, type Theme } from './music';
 import { MenuNavigator } from './menuNav';
 import { Campaign, type Objective } from './campaign';
 import { CAMP_BANNER, FORT, TERRITORIES, type ShopKind } from './layout';
-import { ARMOR, goldFor, loadGoods, MAX_ARMY, MAX_POTIONS, OUTPOST_GOLD, POTION_PRICE, SOLDIER_PRICE, type Goods } from './shop';
+import { ARMOR, goldFor, loadGoods, newGoods, MAX_ARMY, MAX_POTIONS, OUTPOST_GOLD, POTION_PRICE, SOLDIER_PRICE, type Goods } from './shop';
 import type { ShopEntry } from './hud';
 import { DEFAULT_OUTFIT, loadOutfit, type Outfit } from './outfit';
 import { WeaponDrops } from './loot';
@@ -126,6 +126,8 @@ let pendingName = '';
 /** Seconds of play (only counts while actually playing). */
 let playTime = 0;
 let endingShown = false;
+/** The ending has played for this save (it waits for a hero who fell just as Zomawi did). */
+let endingSeen = true;
 /** Weapons the hero has claimed. */
 const owned = new Set<WeaponId>([STARTING_WEAPON]);
 /** Player 2's own weapons (each hero has their own inventory). */
@@ -193,7 +195,8 @@ const campaign = new Campaign(scene, world, enemies, {
   bossEnded: () => hud.showBoss(null),
   leaderDefeated: (id, at) => {
     const w = weaponOf(id);
-    if (w && ctx.players.some((h) => !ownedBy(h).has(w.id))) drops.place(w.id, at.x, at.z);
+    if (w && activeHeroes().some((h) => needsDrop(h, w.id))) drops.place(w.id, at.x, at.z);
+    if (id === 'zomawi') endingSeen = false;
   },
   victory: () => {
     saveGame();
@@ -243,6 +246,7 @@ function saveGame() {
     weapon: player.weapon.id,
     goods: player.goods,
     outfit: player.outfit,
+    endingSeen,
     ...campaign.saveFields(),
     savedAt: Date.now(),
   });
@@ -287,6 +291,7 @@ function becomeHero(hero: Player2Hero) {
   player2.hp = player2.maxHp;
   player2.stamina = player2.maxStamina;
   placeMissingDrops(campaign.leaders);
+  reinforceSquad();
   hud.showP2Picker(null);
   saveHero(hero);
   sfx.warHorn();
@@ -310,6 +315,16 @@ hud.onP2Cancel = () => leavePlayer2();
   }
 }
 
+/** Heroes in play (not a Player 2 still choosing who they are). */
+function activeHeroes() {
+  return ctx.players.filter((h) => !(h === player2 && choosingP2));
+}
+
+/** Takes away any leader's weapon on the ground that no hero playing still needs. */
+function removeUnneededDrops() {
+  for (const w of WEAPONS) if (w.from && drops.isOut(w.id) && !activeHeroes().some((h) => needsDrop(h, w.id))) drops.remove(w.id);
+}
+
 /** This hero hasn't picked up this leader's weapon yet. */
 function needsDrop(h: Player, id: WeaponId) {
   return !h.goods.claimed.includes(id) && !ownedBy(h).has(id);
@@ -327,7 +342,7 @@ function placeMissingDrops(leaders: Iterable<string>) {
   for (const id of leaders) {
     const w = weaponOf(id);
     const land = TERRITORIES.find((t) => t.leader.id === id);
-    if (w && land && ctx.players.some((h) => needsDrop(h, w.id)) && !drops.isOut(w.id)) drops.place(w.id, land.arena.x, land.arena.z);
+    if (w && land && activeHeroes().some((h) => needsDrop(h, w.id)) && !drops.isOut(w.id)) drops.place(w.id, land.arena.x, land.arena.z);
   }
 }
 
@@ -373,7 +388,7 @@ function claimWeapon(w: WeaponDef, hero: Player) {
   ownedBy(hero).add(w.id);
   if (!hero.goods.claimed.includes(w.id)) hero.goods.claimed.push(w.id);
   hero.setWeapon(w.id);
-  if (ctx.players.every((h) => !needsDrop(h, w.id))) drops.remove(w.id);
+  if (activeHeroes().every((h) => !needsDrop(h, w.id))) drops.remove(w.id);
   else hud.announce(`${w.name} is still here`, `The other hero can grab one too`);
   saveWeapons();
   sfx.levelUp();
@@ -391,12 +406,12 @@ function openInventory(hero: Player = player) {
   renderInventory();
   // Two-player: the inventory covers only this hero's half, and the other keeps playing.
   hud.showInventory(true, twoPlayer ? (hero === player ? 'left' : 'right') : null);
-  if (document.pointerLockElement) document.exitPointerLock();
+  if (hero === player && document.pointerLockElement) document.exitPointerLock();
 }
 
 function closeInventory() {
   hud.showInventory(false);
-  lockPointer();
+  if (inventoryFor === player) lockPointer();
 }
 
 /** One player leads the whole red army; two players lead three soldiers each. */
@@ -439,6 +454,7 @@ function enterWorld(save: SaveData) {
   hud.showInventory(false);
   kills = save.kills;
   playTime = save.playTime ?? 0;
+  endingSeen = save.endingSeen ?? true;
   endingShown = false;
   campaign.load(save);
   const spot = respawnPoint(campaign.current.banner);
@@ -453,9 +469,12 @@ function enterWorld(save: SaveData) {
     if (!owned2.has(player2.weapon.id)) player2.setWeapon(STARTING_WEAPON);
     player2.reset(spot.x - 1.6, spot.z);
   }
+  // In Fort Victory's mansion, face the door (and the camera looks out the same way).
+  const facing = campaign.current === campaign.fortCheckpoint ? FORT.gateAngle : 0;
+  for (const h of [player, player2]) h.yaw = facing;
   reinforceSquad(true);
   for (const c of [camCtrl, camCtrl2]) {
-    c.yaw = 0;
+    c.yaw = facing;
     c.pitch = 0.12;
     c.cut();
   }
@@ -470,6 +489,7 @@ function enterWorld(save: SaveData) {
   hud.showScreen('none');
   phase = 'playing';
   ctx.peaceful = false;
+  if (!endingSeen && campaign.victorious) setTimeout(showEnding, 2000);
 }
 
 const mass = (b: Player | Ally | Enemy) => {
@@ -548,6 +568,7 @@ function joinPlayer2(padIndex: number) {
   // Who is Player 2? They pick on their half of the screen while Player 1 plays on.
   p2Hero = null;
   choosingP2 = true;
+  player2.goods = newGoods();
   player2.loadHero('Player 2', 1, 0);
   owned2.clear();
   owned2.add(STARTING_WEAPON);
@@ -578,6 +599,10 @@ function leavePlayer2() {
   input2.padIndex = null;
   ctx.players = [player];
   ctx.leader = player;
+  pausedBy = player;
+  inventoryFor = player;
+  hud.setPauseInventoryLabel('Inventory');
+  removeUnneededDrops();
   player2.h.root.visible = false;
   floaters2.clear();
   hud.setSplit(false);
@@ -607,7 +632,7 @@ function checkJoin() {
     if (!fresh || twoPlayer || phase !== 'playing' || endingShown || menuNav.menuOpen) continue;
     const p1Pad = input.lastPadIndex;
     const p1OnKeyboard = input.mode === 'mouse' || p1Pad === null;
-    if ((waitingForP2 && (p1OnKeyboard || p.index !== p1Pad)) || (p1Pad !== null && input.mode === 'gamepad' && p.index !== p1Pad)) {
+    if ((waitingForP2 && (p1OnKeyboard || p.index !== p1Pad)) || (p1Pad !== null && p.index !== p1Pad)) {
       joinPlayer2(p.index);
       return;
     }
@@ -679,8 +704,7 @@ hud.onGoToFort = () => {
   }
   const from = pausedBy.alive ? pausedBy : player;
   returnSpot = { x: from.pos.x, z: from.pos.z, yaw: from.yaw };
-  const spot = respawnPoint(FORT.banner);
-  teleportTeam(spot.x, spot.z, FORT.gateAngle + Math.PI);
+  teleportTeam(FORT.arrival.x, FORT.arrival.z, FORT.gateAngle);
   hud.setGoBackAvailable(true);
   hud.announce('Fort Victory', 'Pause · Go back returns you to where you were');
   lockPointer();
@@ -706,9 +730,7 @@ const atStall = new Map<Player, ShopKind | null>();
 /** The stall whose counter this hero is standing at, if any. */
 function stallAt(h: Player): ShopKind | null {
   for (const st of FORT.stalls) {
-    const fx = FORT.x + Math.sin(st.angle) * 7.2;
-    const fz = FORT.z + Math.cos(st.angle) * 7.2;
-    if (Math.hypot(h.pos.x - fx, h.pos.z - fz) < 1.7) return st.kind;
+    if (Math.hypot(h.pos.x - st.front.x, h.pos.z - st.front.z) < 1.5) return st.kind;
   }
   return null;
 }
@@ -729,7 +751,7 @@ function openShop(h: Player, kind: ShopKind) {
   hud.showMap(false);
   renderShop();
   hud.showShop(true, twoPlayer ? (h === player ? 'left' : 'right') : null);
-  if (document.pointerLockElement) document.exitPointerLock();
+  if (h === player && document.pointerLockElement) document.exitPointerLock();
   sfx.click();
 }
 
@@ -737,7 +759,7 @@ function closeShop() {
   hud.showShop(false);
   shopKind = null;
   saveWeapons();
-  lockPointer();
+  if (shopFor === player) lockPointer();
 }
 hud.onShopClose = closeShop;
 
@@ -785,10 +807,11 @@ function renderShop() {
     });
   } else if (shopKind === 'barracks') {
     const size = armySize(h);
+    const full = size >= MAX_ARMY || g.soldiers >= MAX_ARMY - ARMY_SIZE;
     entries.push({
       label: 'Hire a soldier',
-      sub: size >= MAX_ARMY ? `Your army is full (${size} of ${MAX_ARMY})` : `${SOLDIER_PRICE} gold · army ${size} of ${MAX_ARMY}`,
-      disabled: size >= MAX_ARMY || g.gold < SOLDIER_PRICE,
+      sub: full ? `Your army is full (${size} of ${MAX_ARMY})` : `${SOLDIER_PRICE} gold · army ${size} of ${MAX_ARMY}`,
+      disabled: full || g.gold < SOLDIER_PRICE,
       onClick: () => {
         g.gold -= SOLDIER_PRICE;
         g.soldiers++;
@@ -981,7 +1004,7 @@ input.onLockChange = (locked) => {
   }
   if (twoPlayer && !locked && phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !hud.outfitOpen && !endingShown) {
     // Player 1 let go of the mouse: their own pause menu, on their half.
-    hud.showPause(player.alive, 'left');
+    hud.showPause(true, 'left');
     return;
   }
   if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !hud.outfitOpen && !endingShown) hud.showPause(!locked && ctx.players.some((h) => h.alive));
@@ -989,7 +1012,12 @@ input.onLockChange = (locked) => {
 
 /** The war is won: release the mouse and roll the ending. */
 function showEnding() {
+  if (endingShown || phase !== 'playing') return;
   endingShown = true;
+  if (!endingSeen) {
+    endingSeen = true;
+    saveGame();
+  }
   hud.showMap(false);
   hud.showPause(false);
   if (document.pointerLockElement) document.exitPointerLock();
@@ -1112,6 +1140,7 @@ function updateSound(dt: number) {
 /** Advances the game by one frame of `realDt` seconds. */
 function tick(realDt: number) {
   checkJoin();
+  input.blockClaim = waitingForP2;
   input.poll(realDt);
   if (twoPlayer) input2.poll(realDt);
   const inputs = twoPlayer ? [input, input2] : [input];
@@ -1136,7 +1165,7 @@ function tick(realDt: number) {
           : hud.pauseOpen
             ? pausedBy
             : null;
-  menuNav.update(browsing ? [inputOf(browsing)] : inputs);
+  menuNav.update(browsing && !deathShown ? [inputOf(browsing)] : inputs);
 
   if (phase === 'menu') {
     player.idle(realDt);
@@ -1167,7 +1196,7 @@ function tick(realDt: number) {
       playTime += realDt;
       const chooserInput = browsing ? inputOf(browsing) : null;
       if (inputs.some((i) => i !== chooserInput && i.mapPressed)) hud.showMap(!hud.mapOpen);
-      if (!hud.inventoryOpen && !hud.p2PickerOpen && !hud.shopOpen) {
+      if (!hud.inventoryOpen && !hud.p2PickerOpen && !hud.shopOpen && !hud.pauseOpen) {
         if (input.inventoryPressed && player.alive) openInventory(player);
         else if (twoPlayer && input2.inventoryPressed && player2.alive) openInventory(player2);
       }
@@ -1210,6 +1239,10 @@ function tick(realDt: number) {
     if (ctx.players.every((h) => !h.alive && h.stateTime > 1.6) && !deathShown) {
       deathShown = true;
       hud.showMap(false);
+      hud.showPause(false);
+      hud.showInventory(false);
+      hud.showShop(false);
+      shopKind = null;
       if (document.pointerLockElement) document.exitPointerLock();
       hud.showDeath(true);
     }
@@ -1300,7 +1333,7 @@ function updateWeaponSwap(browsing: Player | null) {
 
 /** A fallen leader's weapon waiting to be picked up comes before everything else. */
 function weaponObjective(): Objective | null {
-  const near = drops.nearest(ctx.leader.pos);
+  const near = drops.nearest(ctx.leader.pos, (w) => activeHeroes().some((h) => needsDrop(h, w.id)));
   if (!near || campaign.activeFight) return null;
   return { text: `Claim ${near.weapon.name}`, at: near.at };
 }

@@ -34,9 +34,26 @@ export const FORT = (() => {
   // The gate faces the human camp.
   const gateAngle = Math.atan2(HUMAN_CAMP.x - x, HUMAN_CAMP.z - z);
   const at = (angle: number, d: number) => ({ x: x + Math.sin(angle) * d, z: z + Math.cos(angle) * d });
-  const stall = (kind: ShopKind, name: string, offset: number) => {
-    const a = gateAngle + offset;
-    return { kind, name, angle: a, ...at(a, 10.5), counter: at(a, 8.6) };
+  /** A point given as `across` (to the right, facing the gate) and `forward` (toward the gate) from the fort's middle. */
+  const local = (across: number, forward: number) => ({
+    x: x + Math.cos(gateAngle) * across + Math.sin(gateAngle) * forward,
+    z: z - Math.sin(gateAngle) * across + Math.cos(gateAngle) * forward,
+  });
+  /**
+   * A shop stall against one of the mansion hall's side walls (`side` -1 left,
+   * 1 right), its counter facing the red carpet down the middle. `angle` turns
+   * the stall so its back is to the wall; `front` is where a customer stands.
+   */
+  const stall = (kind: ShopKind, name: string, side: number, forward: number) => {
+    const wallward = { x: Math.cos(gateAngle) * side, z: -Math.sin(gateAngle) * side };
+    return {
+      kind,
+      name,
+      angle: Math.atan2(wallward.x, wallward.z),
+      ...local(side * 5.6, forward),
+      counter: local(side * 3.7, forward),
+      front: local(side * 2.4, forward),
+    };
   };
   return {
     id: 'fort',
@@ -49,12 +66,22 @@ export const FORT = (() => {
     hillHeight: 13,
     hillTop: r + 5,
     hillFoot: r + 34,
-    banner: { id: 'fort', name: 'Fort Victory', ...at(gateAngle, 4) },
+    /**
+     * The mansion fills the back of the fort: `forward` is how far its middle
+     * is toward the gate (negative: behind the fort's middle); width runs
+     * across, depth toward the gate. Its door faces the gate.
+     */
+    mansion: { forward: -7.5, width: 16, depth: 11, height: 5.5, door: 3.6 },
+    // The banner stands in the mansion's great hall: heroes come back there.
+    banner: { id: 'fort', name: 'Fort Victory', ...at(gateAngle + Math.PI, 10) },
+    /** Where Go to Fort Victory lands: inside the hall, near the door. */
+    arrival: at(gateAngle + Math.PI, 4.8),
+    // The four shops stand in the mansion's great hall.
     stalls: [
-      stall('potions', 'Potion Shop', Math.PI * 0.45),
-      stall('armory', 'Armory', Math.PI * 0.8),
-      stall('weapons', 'Weaponsmith', -Math.PI * 0.8),
-      stall('barracks', 'Barracks', -Math.PI * 0.45),
+      stall('potions', 'Potion Shop', -1, -10.2),
+      stall('armory', 'Armory', -1, -5.2),
+      stall('weapons', 'Weaponsmith', 1, -5.2),
+      stall('barracks', 'Barracks', 1, -10.2),
     ],
   };
 })();

@@ -382,11 +382,12 @@ export class Player implements Target {
             this.swingSounded = true;
             sfx.swing(sw.heavy);
           }
+          // The swing lands first; then any slam catches the rest around.
+          if (t <= sw.hitEnd) this.checkHits(sw, ctx);
           if (!this.specialDone) {
             this.specialDone = true;
             this.weaponSpecial(sw, ctx);
           }
-          if (t <= sw.hitEnd) this.checkHits(sw, ctx);
         }
         if (t > sw.hitEnd && this.rollBuffer > 0 && this.stamina >= ROLL_STAMINA) {
           this.startRoll(wish.lengthSq() > 0 ? wish : forward);

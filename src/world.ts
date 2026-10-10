@@ -43,7 +43,7 @@ const dirZ = (angle: number) => Math.cos(angle);
 /** Areas kept flat for camps, outposts and arenas: [x, z, radius]. */
 const FLAT_ZONES: [number, number, number][] = [
   [HUMAN_CAMP.x, HUMAN_CAMP.z, 18],
-  [FORT.x, FORT.z, FORT.hillTop],
+  // (Fort Victory's hilltop is flattened separately, in fortHill.)
   ...TERRITORIES.flatMap((t): [number, number, number][] => [
     ...t.outposts.map((o): [number, number, number] => [o.x, o.z, o.flatRadius]),
     [t.arena.x, t.arena.z, t.arena.r + 6],
@@ -119,6 +119,9 @@ function castleHeight(x: number, z: number): number | null {
 
 /** Keeps a camera inside the goo castle's walls while its hero is inside (the goo ring is narrow). */
 export function keepCameraInCastle(cam: THREE.Vector3, hero: THREE.Vector3) {
+  keepCameraInMansion(cam, hero);
+  const onBridge = castleCoords(hero.x, hero.z);
+  if (onBridge.across <= BRIDGE_HALF && onBridge.along > CASTLE_PLATFORM_R) return;
   const limit = CASTLE.r - 0.9;
   if (Math.hypot(hero.x - CASTLE.x, hero.z - CASTLE.z) > limit) return;
   const dx = cam.x - CASTLE.x;
@@ -174,12 +177,17 @@ function terrainHeight(x: number, z: number): number {
     const reach = r + 14;
     if (dx * dx + dz * dz < reach * reach) flat = Math.min(flat, smoothstep(r, reach, Math.hypot(dx, dz)));
   }
-  if (flat === 0) return fortHill(x, z);
+  // The fort's hill rises everywhere but other clearings (outposts and camps stay level).
+  const hill = fortHill(x, z) * flat;
+  // The hilltop itself is flat too.
+  const top = smoothstep(FORT.hillTop, FORT.hillTop + 14, Math.hypot(x - FORT.x, z - FORT.z));
+  flat = Math.min(flat, top);
+  if (flat === 0) return hill;
   const h =
     Math.sin(x * 0.045) * Math.cos(z * 0.038) * 3.2 +
     Math.sin(x * 0.11 + 1.3) * Math.sin(z * 0.09 + 0.7) * 1.3 +
     Math.sin((x + z) * 0.21) * 0.3;
-  return h * flat + fortHill(x, z);
+  return h * flat + hill;
 }
 
 /** Fort Victory's hill: flat on top, sloping gently down all around. */
@@ -212,7 +220,7 @@ function biomeAt(x: number, z: number): { id: TerritoryId | null; weight: number
 /** Keeps scenery out of camps, outposts, gates and arenas. */
 function nearLandmark(x: number, z: number) {
   const near = (px: number, pz: number, r: number) => Math.hypot(x - px, z - pz) < r;
-  if (near(HUMAN_CAMP.x, HUMAN_CAMP.z, 22) || near(FORT.x, FORT.z, FORT.r + 8)) return true;
+  if (near(HUMAN_CAMP.x, HUMAN_CAMP.z, 22) || near(FORT.x, FORT.z, FORT.r + 16)) return true;
   return TERRITORIES.some(
     (t) =>
       t.outposts.some((o) => near(o.x, o.z, o.flatRadius - 1)) ||
@@ -947,35 +955,174 @@ const STALL_LOOKS: Record<ShopKind, { canopy: number; keeper: HumanoidLook }> = 
   barracks: { canopy: 0x2a4f9a, keeper: { skin: 0xf1c9a5, shirt: 0xa3262a, pants: 0x3a3f4a, boots: 0x3b2a1e, eyes: 0x222222, belt: 0x5a3c22, armor: 0xb8c0c8, plume: 0xd23a2a } },
 };
 
+/** A point in the fort, given as `across` (to the right, facing the gate) and `forward` (toward the gate) from its middle. */
+function fortPoint(across: number, forward: number) {
+  const g = FORT.gateAngle;
+  return { x: FORT.x + Math.cos(g) * across + Math.sin(g) * forward, z: FORT.z - Math.sin(g) * across + Math.cos(g) * forward };
+}
+
+/** The mansion's walls in fort coordinates, for the camera to stay inside. */
+const MANSION_BOUNDS = (() => {
+  const m = FORT.mansion;
+  return { across: m.width / 2, back: m.forward - m.depth / 2, front: m.forward + m.depth / 2, height: m.height };
+})();
+
+/** Fort coordinates of a world point. */
+function fortLocal(x: number, z: number) {
+  const g = FORT.gateAngle;
+  const dx = x - FORT.x;
+  const dz = z - FORT.z;
+  return { across: dx * Math.cos(g) - dz * Math.sin(g), forward: dx * Math.sin(g) + dz * Math.cos(g) };
+}
+
+/** Inside the mansion's walls. */
+export function inMansion(x: number, z: number, margin = 0) {
+  const p = fortLocal(x, z);
+  const b = MANSION_BOUNDS;
+  return Math.abs(p.across) < b.across - margin && p.forward > b.back + margin && p.forward < b.front - margin;
+}
+
+/** Keeps a camera inside the mansion (and under its ceiling) while its hero is inside. */
+function keepCameraInMansion(cam: THREE.Vector3, hero: THREE.Vector3) {
+  if (!inMansion(hero.x, hero.z)) return;
+  const b = MANSION_BOUNDS;
+  const p = fortLocal(cam.x, cam.z);
+  const m = 0.6;
+  const across = clamp(p.across, -b.across + m, b.across - m);
+  const forward = clamp(p.forward, b.back + m, b.front - m);
+  if (across !== p.across || forward !== p.forward) {
+    const w = fortPoint(across, forward);
+    cam.x = w.x;
+    cam.z = w.z;
+  }
+  cam.y = Math.min(cam.y, heightAt(FORT.x, FORT.z) + b.height - 0.4);
+}
+
+/**
+ * Fort Victory's mansion: white walls, a dark slate roof with chimneys, rows
+ * of windows, a porch with columns, and a great hall inside (wooden floor,
+ * red carpet, a fireplace) where the heroes' banner stands.
+ */
+function addMansion(scene: THREE.Scene, colliders: Colliders) {
+  const m = FORT.mansion;
+  const base = heightAt(FORT.x, FORT.z);
+  const yaw = FORT.gateAngle;
+  const white = lambert(0xe8e0d0);
+  const trim = lambert(0x5a3c22);
+  const slate = lambert(0x3a4458);
+  const glass = new THREE.MeshBasicMaterial({ color: 0xffe08a });
+  const piece = (geo: THREE.BufferGeometry, mat: THREE.Material, across: number, y: number, forward: number, rotY = 0) => {
+    const p = fortPoint(across, forward);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(p.x, base + y, p.z);
+    mesh.rotation.y = yaw + rotY;
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.userData.mergeable = true;
+    scene.add(mesh);
+    return mesh;
+  };
+  const hw = m.width / 2;
+  const back = m.forward - m.depth / 2;
+  const front = m.forward + m.depth / 2;
+  const t = 0.5; // wall thickness
+  const wallCollider = (a0: number, f0: number, a1: number, f1: number) => {
+    const n = Math.ceil(Math.hypot(a1 - a0, f1 - f0) / 0.5);
+    for (let i = 0; i <= n; i++) {
+      const p = fortPoint(a0 + ((a1 - a0) * i) / n, f0 + ((f1 - f0) * i) / n);
+      colliders.circles.push({ x: p.x, z: p.z, r: 0.4 });
+    }
+  };
+
+  // Walls: back, sides, and the front with a big door in the middle.
+  piece(new THREE.BoxGeometry(m.width, m.height, t), white, 0, m.height / 2, back);
+  for (const side of [-1, 1]) piece(new THREE.BoxGeometry(t, m.height, m.depth), white, side * hw, m.height / 2, m.forward);
+  const frontPart = (m.width - m.door) / 2;
+  for (const side of [-1, 1]) piece(new THREE.BoxGeometry(frontPart, m.height, t), white, side * (m.door / 2 + frontPart / 2), m.height / 2, front);
+  piece(new THREE.BoxGeometry(m.door, m.height - 3.4, t), white, 0, 3.4 + (m.height - 3.4) / 2, front); // above the door
+  wallCollider(-hw, back, hw, back);
+  wallCollider(-hw, back, -hw, front);
+  wallCollider(hw, back, hw, front);
+  wallCollider(-hw, front, -m.door / 2, front);
+  wallCollider(m.door / 2, front, hw, front);
+  // Dark wood trim along the top and between the floors.
+  for (const y of [2.8, m.height]) {
+    piece(new THREE.BoxGeometry(m.width + 0.2, 0.2, t + 0.15), trim, 0, y, back);
+    for (const side of [-1, 1]) {
+      piece(new THREE.BoxGeometry(t + 0.15, 0.2, m.depth + 0.2), trim, side * hw, y, m.forward);
+      piece(new THREE.BoxGeometry(frontPart, 0.2, t + 0.15), trim, side * (m.door / 2 + frontPart / 2), y, front);
+    }
+  }
+
+  // The roof: a ceiling inside, and two slopes meeting at a ridge, with chimneys.
+  piece(new THREE.BoxGeometry(m.width, 0.2, m.depth), lambert(0x6a4a30), 0, m.height - 0.1, m.forward);
+  const pitch = 0.5;
+  const slope = m.depth / 2 / Math.cos(pitch) + 0.6;
+  for (const side of [-1, 1]) {
+    const roof = piece(new THREE.BoxGeometry(m.width + 1, 0.3, slope), slate, 0, m.height + Math.tan(pitch) * (m.depth / 4) + 0.1, m.forward + side * (m.depth / 4));
+    roof.rotateX(side * pitch);
+  }
+  for (const across of [-hw + 2, hw - 2]) piece(new THREE.BoxGeometry(1.1, 3.2, 1.1), lambert(0x8a5a4a), across, m.height + 2, back + 2.5);
+
+  // Windows: two rows on the front and sides, warmly lit.
+  for (const y of [1.6, 4.2]) {
+    for (const across of [-hw + 1.6, -hw + 4, hw - 4, hw - 1.6]) piece(new THREE.BoxGeometry(1, 1.2, 0.1), glass, across, y, front + t / 2 + 0.03);
+    for (const side of [-1, 1]) for (const f of [back + 2.5, m.forward, front - 2.5]) piece(new THREE.BoxGeometry(0.1, 1.2, 1), glass, side * (hw + t / 2 + 0.03), y, f);
+  }
+  // Above the door: one big window.
+  piece(new THREE.BoxGeometry(2, 1, 0.1), glass, 0, 4.4, front + t / 2 + 0.03);
+
+  // The porch: steps, four columns and a peaked roof over the door.
+  piece(new THREE.BoxGeometry(m.door + 3, 0.25, 2.4), white, 0, 0.12, front + 1.3);
+  for (const across of [-2.6, -1, 1, 2.6]) {
+    piece(new THREE.CylinderGeometry(0.22, 0.25, 3.6, 10), white, across, 1.8, front + 2.2);
+    const p = fortPoint(across, front + 2.2);
+    colliders.circles.push({ x: p.x, z: p.z, r: 0.3 });
+  }
+  piece(new THREE.BoxGeometry(m.door + 3.2, 0.3, 2.6), white, 0, 3.75, front + 1.3);
+  piece(new THREE.ConeGeometry(3.6, 1.4, 4, 1).rotateY(Math.PI / 4).scale(1, 1, 0.42), white, 0, 4.6, front + 1.3);
+
+  // The great hall: a wooden floor, a red carpet to the door, and a fireplace.
+  piece(new THREE.BoxGeometry(m.width - t, 0.08, m.depth - t), lambert(0x7a5a3a), 0, 0.04, m.forward);
+  piece(new THREE.BoxGeometry(2.2, 0.1, m.depth - t), lambert(0x8a1a22), 0, 0.06, m.forward);
+  piece(new THREE.BoxGeometry(3.2, 2.6, 1), lambert(0x6a6460), 0, 1.3, back + 0.7);
+  piece(new THREE.BoxGeometry(1.8, 1.2, 0.3), new THREE.MeshBasicMaterial({ color: 0xff7a2a }), 0, 0.7, back + 1.1);
+  const fire = fortPoint(0, back + 0.8);
+  colliders.circles.push({ x: fire.x, z: fire.z, r: 1.4 });
+  // Tall banners of the human army on the walls.
+  for (const side of [-1, 1]) piece(new THREE.BoxGeometry(0.08, 2.6, 1.2), lambert(0xa3262a), side * (hw - t / 2 - 0.06), 2.6, m.forward);
+}
+
 /** Fort Victory: stone walls on the hilltop, a gate toward the camp, and four shop stalls. */
 function addFort(scene: THREE.Scene, colliders: Colliders) {
   const { x: fx, z: fz, r, gateAngle } = FORT;
   const stone = lambert(0x9a9488);
   const darkStone = lambert(0x7a746a);
   const gateHalf = 0.22;
-  const inGate = (a: number) => Math.abs(Math.atan2(Math.sin(a - gateAngle), Math.cos(a - gateAngle))) < gateHalf;
 
   // Walls with square towers, broken by the gate.
-  const segments = 28;
+  // The wall runs all the way round from one side of the gate to the other.
+  const segments = 27;
+  const start = gateAngle + gateHalf;
+  const span = Math.PI * 2 - gateHalf * 2;
   for (let i = 0; i < segments; i++) {
-    const a = (i / segments) * Math.PI * 2;
-    const a2 = ((i + 1) / segments) * Math.PI * 2;
-    const mid = (a + a2) / 2;
-    if (!inGate(mid)) {
-      const len = 2 * r * Math.sin(Math.PI / segments) + 0.3;
-      place(scene, new THREE.BoxGeometry(len, 3.6, 0.9), stone, fx + Math.sin(mid) * r, fz + Math.cos(mid) * r, 1.8, mid);
-      // Battlements along the top.
-      place(scene, new THREE.BoxGeometry(len * 0.45, 0.6, 1), stone, fx + Math.sin(mid) * r, fz + Math.cos(mid) * r, 3.9, mid);
+    const a = start + (i / segments) * span;
+    const mid = start + ((i + 0.5) / segments) * span;
+    const len = 2 * r * Math.sin(span / segments / 2) + 0.3;
+    place(scene, new THREE.BoxGeometry(len, 3.6, 0.9), stone, fx + Math.sin(mid) * r, fz + Math.cos(mid) * r, 1.8, mid);
+    // Battlements along the top.
+    place(scene, new THREE.BoxGeometry(len * 0.45, 0.6, 1), stone, fx + Math.sin(mid) * r, fz + Math.cos(mid) * r, 3.9, mid);
+    if (i % 7 === 3) {
+      place(scene, new THREE.BoxGeometry(2.6, 6, 2.6), darkStone, fx + Math.sin(a) * r, fz + Math.cos(a) * r, 3, a);
+      colliders.circles.push({ x: fx + Math.sin(a) * r, z: fz + Math.cos(a) * r, r: 1.5 });
     }
-    if (i % 7 === 3) place(scene, new THREE.BoxGeometry(2.6, 6, 2.6), darkStone, fx + Math.sin(a) * r, fz + Math.cos(a) * r, 3, a);
   }
-  for (let i = 0; i < 112; i++) {
-    const a = (i / 112) * Math.PI * 2;
-    if (!inGate(a)) colliders.circles.push({ x: fx + Math.sin(a) * r, z: fz + Math.cos(a) * r, r: 0.6 });
+  for (let i = 0; i <= 108; i++) {
+    const a = start + (i / 108) * span;
+    colliders.circles.push({ x: fx + Math.sin(a) * r, z: fz + Math.cos(a) * r, r: 0.6 });
   }
-  // Gate towers with gold-topped flags.
+  // Gate towers with gold-topped flags, at the ends of the wall.
   for (const side of [-1, 1]) {
-    const a = gateAngle + side * (gateHalf + 0.06);
+    const a = gateAngle + side * gateHalf;
     const gx = fx + Math.sin(a) * r;
     const gz = fz + Math.cos(a) * r;
     place(scene, new THREE.BoxGeometry(2.4, 7, 2.4), darkStone, gx, gz, 3.5, a);
@@ -987,6 +1134,8 @@ function addFort(scene: THREE.Scene, colliders: Colliders) {
   const ax = fx + Math.sin(gateAngle) * r;
   const az = fz + Math.cos(gateAngle) * r;
   place(scene, new THREE.BoxGeometry(2 * r * Math.sin(gateHalf) + 1, 1, 1.2), darkStone, ax, az, 5.4, gateAngle);
+
+  addMansion(scene, colliders);
 
   // The shops: a counter under a colored canopy, with a shopkeeper behind it.
   for (const stall of FORT.stalls) {

@@ -709,6 +709,7 @@ export class Hud {
     $('view2').classList.toggle('hidden', !on);
     $('split-line').classList.toggle('hidden', !on);
     $('pause-p2-btn').textContent = on ? 'Remove Player 2' : 'Add Player 2';
+    if (!on) this.pause.classList.remove('side-left', 'side-right');
   }
 
   setPadDebug(text: string) {
@@ -807,10 +808,13 @@ export class Hud {
     fade.style.opacity = '0';
   }
 
-  /** `side`: two-player, the pause menu covers only that hero's half of the screen. */
-  showPause(show: boolean, side: 'left' | 'right' | null = null) {
+  /**
+   * `side`: two-player, the pause menu covers only that hero's half of the
+   * screen. Left out, it stays on whichever side it was (back from Options).
+   */
+  showPause(show: boolean, side?: 'left' | 'right' | null) {
     this.pause.classList.toggle('hidden', !show);
-    if (!show) return;
+    if (!show || side === undefined) return;
     this.pause.classList.toggle('side-left', side === 'left');
     this.pause.classList.toggle('side-right', side === 'right');
   }

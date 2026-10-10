@@ -204,7 +204,7 @@ export class Projectiles {
   private enemyAt(p: Projectile, ctx: GameContext): Enemy | null {
     const r = SPECS[p.kind].radius;
     for (const e of ctx.enemies) {
-      if (!e.alive || e.flying) continue;
+      if (!e.alive || e.flying || !e.fightActive) continue;
       const dx = p.pos.x - e.pos.x;
       const dz = p.pos.z - e.pos.z;
       if (Math.abs(dx) > 4 || Math.abs(dz) > 4) continue;
