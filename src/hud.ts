@@ -7,6 +7,7 @@ import { drawMap, type MapData } from './map';
 import { sfx } from './audio';
 import { TERRITORIES } from './layout';
 import { WEAPONS, weaponIcon, type WeaponId } from './weapons';
+import type { Player2Hero } from './heroes';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -182,6 +183,10 @@ export class Hud {
   onInventoryClose?: () => void;
   onEquip?: (id: WeaponId) => void;
   onTogglePlayer2?: () => void;
+  /** Player 2 picked a saved hero (by id), named a new one, or backed out. */
+  onP2Pick?: (id: string) => void;
+  onP2New?: (name: string) => void;
+  onP2Cancel?: () => void;
 
   /** Player 1's view, then Player 2's. */
   readonly views: [HeroView, HeroView];
@@ -305,6 +310,37 @@ export class Hud {
     // Inventory: one card per weapon, built once and updated in place (so controller focus stays put).
     $('pause-inventory-btn').addEventListener('click', () => this.onInventory?.());
     $('pause-p2-btn').addEventListener('click', () => this.onTogglePlayer2?.());
+
+    // Who is Player 2?
+    const p2Name = $<HTMLInputElement>('p2-name-input');
+    const p2Error = $('p2-name-error');
+    $('p2-new-btn').addEventListener('click', () => {
+      $('p2-pick').classList.add('hidden');
+      $('p2-new').classList.remove('hidden');
+      p2Name.value = '';
+      p2Error.textContent = '';
+    });
+    $('p2-back-btn').addEventListener('click', () => {
+      $('p2-new').classList.add('hidden');
+      $('p2-pick').classList.remove('hidden');
+    });
+    $('p2-cancel-btn').addEventListener('click', () => this.onP2Cancel?.());
+    $('p2-random-btn').addEventListener('click', () => {
+      const options = RANDOM_NAMES.filter((n) => n !== p2Name.value);
+      p2Name.value = options[Math.floor(Math.random() * options.length)];
+      p2Error.textContent = '';
+    });
+    p2Name.addEventListener('input', () => (p2Error.textContent = ''));
+    $('p2-new').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const result = cleanName(p2Name.value);
+      if ('error' in result) {
+        p2Error.textContent = result.error;
+        return;
+      }
+      p2Name.blur();
+      this.onP2New?.(result.name);
+    });
     $('inventory-close-btn').addEventListener('click', () => this.onInventoryClose?.());
     const grid = $('weapon-grid');
     WEAPONS.forEach((w, i) => {
@@ -472,6 +508,40 @@ export class Hud {
       : 'Click a weapon to equip it    I or Esc · Back to battle    In battle, keys 1–5 swap weapons';
   }
 
+  get p2PickerOpen() {
+    return !$('p2-screen').classList.contains('hidden');
+  }
+
+  /** The "Who is Player 2?" list on the right half: saved heroes, newest first. */
+  showP2Picker(heroes: Player2Hero[] | null) {
+    $('p2-screen').classList.toggle('hidden', heroes === null);
+    if (!heroes) return;
+    $('p2-new').classList.add('hidden');
+    $('p2-pick').classList.remove('hidden');
+    const list = $('p2-list');
+    list.replaceChildren(
+      ...heroes.map((h) => {
+        const b = document.createElement('button');
+        b.className = 'p2-hero';
+        b.append(h.name, Object.assign(document.createElement('span'), { className: 'button-sub', textContent: `Level ${h.level} · ${h.weapons.length} ${h.weapons.length === 1 ? 'weapon' : 'weapons'}` }));
+        b.addEventListener('click', () => this.onP2Pick?.(h.id));
+        return b;
+      }),
+    );
+    // No saved heroes yet: straight to naming one.
+    if (heroes.length === 0) $('p2-new-btn').click();
+  }
+
+  /** Button hints match what's being played with: Xbox buttons for a controller, keys for a keyboard. */
+  setButtonHints(controller: boolean) {
+    const hint = controller ? 'View · Map \u00a0 Y · Inventory' : 'M · Map \u00a0 I · Inventory';
+    const el = $('hud-hint');
+    if (el.textContent !== hint) {
+      el.textContent = hint;
+      this.mapScreen.querySelector('.map-hint')!.textContent = controller ? 'View · Close map' : 'M · Close map';
+    }
+  }
+
   setPauseInventoryLabel(label: string) {
     $('pause-inventory-btn').textContent = label;
   }
@@ -580,8 +650,12 @@ export class Hud {
     fade.style.opacity = '0';
   }
 
-  showPause(show: boolean) {
+  /** `side`: two-player, the pause menu covers only that hero's half of the screen. */
+  showPause(show: boolean, side: 'left' | 'right' | null = null) {
     this.pause.classList.toggle('hidden', !show);
+    if (!show) return;
+    this.pause.classList.toggle('side-left', side === 'left');
+    this.pause.classList.toggle('side-right', side === 'right');
   }
 
   private tipIndex = Math.floor(Math.random() * DEATH_TIPS.length);
@@ -618,9 +692,9 @@ export class Hud {
     setTimeout(() => this.nextAnnouncement(), ANNOUNCE_TIME);
   }
 
-  showLevelUp(level: number) {
+  showLevelUp(level: number, heroName?: string) {
     this.announce(
-      'Level Up',
+      heroName ? `${heroName} · Level Up` : 'Level Up',
       `Level ${level} · Health +${PER_LEVEL.hp} · Stamina +${PER_LEVEL.stamina} · Damage +${Math.round(PER_LEVEL.damage * 100)}%`,
       true,
     );

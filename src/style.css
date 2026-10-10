@@ -1039,7 +1039,8 @@ button.weapon-card.locked {
   right: 50%;
 }
 
-#inventory-screen.side-right {
+#inventory-screen.side-right,
+#p2-screen.side-right {
   left: 50%;
 }
 
@@ -1052,4 +1053,50 @@ button.weapon-card.locked {
 #inventory-screen.side-left .weapon-desc,
 #inventory-screen.side-right .weapon-desc {
   display: none;
+}
+
+/* Who is Player 2? */
+.p2-panel {
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
+.p2-panel h2 {
+  color: #9cc4ff;
+}
+
+#p2-list button {
+  min-width: 260px;
+  background: #1e3a6e;
+  border-color: #3a8ae0;
+}
+
+#p2-list button:hover {
+  background: #28488a;
+}
+
+.p2-actions {
+  margin-top: 18px;
+}
+
+#p2-name-input {
+  font: inherit;
+  font-size: 20px;
+  width: 220px;
+  padding: 8px 12px;
+  color: #f2ead8;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid #3a8ae0;
+  border-radius: 4px;
+  outline: none;
+  user-select: text;
+}
+
+/* Two-player: the pause menu covers only the presser's half. */
+#pause-screen.side-left {
+  right: 50%;
+}
+
+#pause-screen.side-right {
+  left: 50%;
 }

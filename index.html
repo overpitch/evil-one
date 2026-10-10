@@ -181,6 +181,33 @@
       </div>
     </div>
 
+    <!-- Who is Player 2? (on the right half, while Player 1 plays on) -->
+    <div id="p2-screen" class="overlay screen side-right hidden">
+      <div class="panel p2-panel">
+        <h2>Who is Player 2?</h2>
+        <div id="p2-pick">
+          <p class="subtitle">Pick your hero, or make a new one</p>
+          <div class="menu" id="p2-list"></div>
+          <div class="menu row p2-actions">
+            <button id="p2-new-btn">New hero</button>
+            <button id="p2-cancel-btn" class="secondary">Cancel</button>
+          </div>
+        </div>
+        <form id="p2-new" class="hidden" autocomplete="off">
+          <p class="subtitle">Name your hero</p>
+          <div class="name-row">
+            <input id="p2-name-input" maxlength="20" spellcheck="false" placeholder="Enter a name" />
+            <button type="button" id="p2-random-btn" class="secondary">Random</button>
+          </div>
+          <p class="error" id="p2-name-error"></p>
+          <div class="menu row">
+            <button type="submit" id="p2-start-btn">Join the fight</button>
+            <button type="button" id="p2-back-btn" class="secondary">Back</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Map -->
     <div id="map-screen" class="overlay map hidden">
       <div class="map-panel">

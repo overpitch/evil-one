@@ -19,13 +19,17 @@ import { WeaponDrops } from './loot';
 import { isWeaponId, STARTING_WEAPON, WEAPONS, weaponOf, type WeaponDef, type WeaponId } from './weapons';
 import { DIFFICULTIES, IS_XBOX, loadSettings, saveSettings, type Settings } from './settings';
 import { loadSave, newSave, useTestSaveSlot, writeSave, type SaveData } from './save';
+import { loadHeroes, newHero, saveHero, useTestHeroList, type Player2Hero } from './heroes';
 import type { MapData } from './map';
 import type { GameContext } from './types';
 
 const params = new URLSearchParams(location.search);
 // ?test skips the menus, uses a separate save slot, and runs without pointer lock (for automated checks).
 const testMode = params.has('test');
-if (testMode) useTestSaveSlot();
+if (testMode) {
+  useTestSaveSlot();
+  useTestHeroList();
+}
 
 const settings = loadSettings();
 // ?lite forces Low graphics for this visit (for trying it out on a struggling device).
@@ -198,28 +202,22 @@ function floatText(at: THREE.Vector3, text: string, kind: Parameters<Floaters['s
   if (twoPlayer) floaters2.spawn(at, text, kind);
 }
 
-/** XP and levels are shared: Player 2 always matches Player 1. */
+/** Every kill and capture gives each hero the XP; each levels up on their own. */
 function awardXp(amount: number) {
-  const gained = player.gainXp(amount) > 0;
-  syncPlayer2();
-  if (gained) {
-    for (const h of ctx.players) {
-      const at = new THREE.Vector3(h.pos.x, h.pos.y + 1, h.pos.z);
-      particles.burst(at, 0xffd36b, 30, 6);
-      particles.burst(at, 0xfff2b0, 15, 4);
-      if (h.alive) {
-        h.hp = h.maxHp;
-        h.stamina = h.maxStamina;
-      }
+  for (const h of ctx.players) {
+    if (h === player2 && choosingP2) continue;
+    if (h.gainXp(amount) === 0) continue;
+    const at = new THREE.Vector3(h.pos.x, h.pos.y + 1, h.pos.z);
+    particles.burst(at, 0xffd36b, 30, 6);
+    particles.burst(at, 0xfff2b0, 15, 4);
+    if (h.alive) {
+      h.hp = h.maxHp;
+      h.stamina = h.maxStamina;
     }
     ctx.addShake(0.2);
     sfx.levelUp();
-    hud.showLevelUp(player.level);
+    hud.showLevelUp(h.level, twoPlayer ? h.name : undefined);
   }
-}
-
-function syncPlayer2() {
-  if (player2.level !== player.level || player2.xp !== player.xp) player2.loadHero(player2.name, player.level, player.xp);
 }
 
 function saveGame() {
@@ -232,10 +230,10 @@ function saveGame() {
     playTime: Math.round(playTime),
     weapons: [...owned],
     weapon: player.weapon.id,
-    player2: player2Fields(),
     ...campaign.saveFields(),
     savedAt: Date.now(),
   });
+  saveP2();
 }
 
 /**
@@ -244,22 +242,57 @@ function saveGame() {
  */
 function saveWeapons() {
   const save = loadSave();
-  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id, player2: player2Fields() ?? save.player2 });
+  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id });
+  saveP2();
 }
 
-/** Player 2's weapons for the save (kept from an earlier visit if they aren't playing now). */
-function player2Fields() {
-  if (!twoPlayer) return loadSave()?.player2;
-  return { weapons: [...owned2], weapon: player2.weapon.id };
+// ---------- Saved Player 2 heroes ----------
+
+/** The saved hero Player 2 is playing (null while choosing, or one-player). */
+let p2Hero: Player2Hero | null = null;
+/** Player 2 has joined and is picking who they are. */
+let choosingP2 = false;
+
+/** Saves Player 2's hero: level, XP and weapons. */
+function saveP2() {
+  if (!twoPlayer || !p2Hero) return;
+  p2Hero = { ...p2Hero, level: player2.level, xp: player2.xp, weapons: [...owned2], weapon: player2.weapon.id };
+  saveHero(p2Hero);
 }
 
-/** Player 2's own weapons, from the save (or just the sword the first time). */
-function loadPlayer2Weapons() {
-  const saved = loadSave()?.player2;
+/** Player 2 becomes a saved hero, with their own level, XP and weapons. */
+function becomeHero(hero: Player2Hero) {
+  p2Hero = hero;
+  choosingP2 = false;
+  player2.loadHero(hero.name, hero.level, hero.xp);
   owned2.clear();
   owned2.add(STARTING_WEAPON);
-  for (const id of saved?.weapons ?? []) if (isWeaponId(id)) owned2.add(id);
-  player2.setWeapon(isWeaponId(saved?.weapon) && owned2.has(saved.weapon) ? saved.weapon : STARTING_WEAPON);
+  for (const id of hero.weapons) if (isWeaponId(id)) owned2.add(id);
+  player2.setWeapon(isWeaponId(hero.weapon) && owned2.has(hero.weapon) ? hero.weapon : STARTING_WEAPON);
+  player2.hp = player2.maxHp;
+  player2.stamina = player2.maxStamina;
+  placeMissingDrops(campaign.leaders);
+  hud.showP2Picker(null);
+  saveHero(hero);
+  sfx.warHorn();
+  hud.announce(`${hero.name} joins the fight!`, `Level ${hero.level} · Each hero leads an army of three`);
+}
+
+hud.onP2Pick = (id) => {
+  const hero = loadHeroes().find((h) => h.id === id);
+  if (hero) becomeHero(hero);
+};
+hud.onP2New = (name) => becomeHero(newHero(name));
+hud.onP2Cancel = () => leavePlayer2();
+
+// A Player 2 from before saved heroes existed (weapons kept in the main save) becomes a saved hero.
+{
+  const old = loadSave() as (SaveData & { player2?: { weapons: string[]; weapon: string } }) | null;
+  if (old?.player2 && loadHeroes().length === 0) {
+    saveHero({ ...newHero('Player 2'), level: old.level, weapons: old.player2.weapons, weapon: old.player2.weapon });
+    delete old.player2;
+    writeSave(old);
+  }
 }
 
 /** Puts each beaten leader's weapon back in its lair until every hero playing has their own. */
@@ -280,7 +313,6 @@ function loadWeapons(save: SaveData | null) {
   const claimed = save?.weapons ?? leaders.map((id) => weaponOf(id)?.id);
   for (const id of claimed) if (isWeaponId(id)) owned.add(id);
   player.setWeapon(isWeaponId(save?.weapon) && owned.has(save.weapon) ? save.weapon : STARTING_WEAPON);
-  if (twoPlayer) loadPlayer2Weapons();
   drops.clear();
   placeMissingDrops(leaders);
 }
@@ -370,7 +402,11 @@ function enterWorld(save: SaveData) {
   const spot = respawnPoint(campaign.current.banner);
   player.reset(spot.x, spot.z);
   if (twoPlayer) {
-    syncPlayer2();
+    const saved = p2Hero && loadHeroes().find((h) => h.id === p2Hero!.id);
+    if (saved) {
+      p2Hero = saved;
+      player2.loadHero(saved.name, saved.level, saved.xp);
+    }
     if (!owned2.has(player2.weapon.id)) player2.setWeapon(STARTING_WEAPON);
     player2.reset(spot.x - 1.6, spot.z);
   }
@@ -466,9 +502,14 @@ function joinPlayer2(padIndex: number) {
   input.exclude = padIndex;
   if (input.lastPadIndex === padIndex) input.lastPadIndex = null;
   ctx.players = [player, player2];
-  player2.loadHero('Player 2', player.level, player.xp);
-  loadPlayer2Weapons();
-  placeMissingDrops(campaign.leaders);
+  // Who is Player 2? They pick on their half of the screen while Player 1 plays on.
+  p2Hero = null;
+  choosingP2 = true;
+  player2.loadHero('Player 2', 1, 0);
+  owned2.clear();
+  owned2.add(STARTING_WEAPON);
+  player2.setWeapon(STARTING_WEAPON);
+  hud.showP2Picker(loadHeroes());
   // Appear at Player 1's left (the camera looks over the right shoulder).
   const side = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw)).multiplyScalar(1.6);
   player2.reset(player.pos.x + side.x, player.pos.z + side.z);
@@ -480,13 +521,14 @@ function joinPlayer2(padIndex: number) {
   hud.setSplit(true);
   updateAspect();
   reinforceSquad();
-  sfx.warHorn();
-  hud.announce('Player 2 has joined!', 'Each hero leads an army of three · Menu · Remove Player 2');
 }
 
 function leavePlayer2() {
   if (!twoPlayer) return;
-  saveWeapons(); // keep Player 2's weapons for next time
+  saveP2(); // keep Player 2's hero for next time
+  p2Hero = null;
+  choosingP2 = false;
+  hud.showP2Picker(null);
   twoPlayer = false;
   waitingForP2 = false;
   input.exclude = null;
@@ -499,7 +541,7 @@ function leavePlayer2() {
   updateAspect();
   // Player 1's army is back to full strength.
   reinforceSquad();
-  hud.announce('Player 2 has left', 'Your army is back to full strength');
+  hud.announce('Player 2 has left', 'Their hero is saved · Your army is back to full strength');
 }
 
 /** Each controller's A button last frame, to catch a fresh press. */
@@ -622,6 +664,11 @@ input.onLockChange = (locked) => {
     hud.showMap(false);
     pausedBy = player;
     hud.setPauseInventoryLabel(twoPlayer ? `${player.name}'s inventory` : 'Inventory');
+  }
+  if (twoPlayer && !locked && phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !endingShown) {
+    // Player 1 let go of the mouse: their own pause menu, on their half.
+    hud.showPause(player.alive, 'left');
+    return;
   }
   if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !endingShown) hud.showPause(!locked && ctx.players.some((h) => h.alive));
 };
@@ -750,13 +797,25 @@ function tick(realDt: number) {
   input.poll(realDt);
   if (twoPlayer) input2.poll(realDt);
   const inputs = twoPlayer ? [input, input2] : [input];
-  // Menu button closes the pause menu; the menus themselves are driven by the d-pad, A and B.
-  const menuPressed = (input.mode === 'gamepad' && input.pausePressed) || (twoPlayer && input2.pausePressed);
-  const resumed = menuPressed && hud.pauseOpen;
+  // The Menu button opens and closes the pause menu; the menus themselves are driven by the d-pad, A and B.
+  // Two-player: the pause menu covers only the presser's half, and only they can close it.
+  const p1Menu = input.mode === 'gamepad' && input.pausePressed;
+  const p2Menu = twoPlayer && !choosingP2 && input2.pausePressed;
+  const menuPressed = p1Menu || p2Menu;
+  const resumed = hud.pauseOpen && (twoPlayer ? (pausedBy === player ? p1Menu : p2Menu) : menuPressed);
   if (resumed) hud.showPause(false);
-  // Two-player inventory: on one hero's half only. Only their controller works it, and the game goes on.
-  const sideInventory = twoPlayer && hud.inventoryOpen;
-  const browsing = sideInventory ? inventoryFor : null;
+  // Two-player menus (pause, inventory, who is Player 2?) cover one hero's half only.
+  // Only that hero's controller works them, and the game goes on for the other.
+  const sideInventory = twoPlayer && (hud.inventoryOpen || hud.p2PickerOpen || hud.pauseOpen);
+  const browsing = !twoPlayer
+    ? null
+    : hud.p2PickerOpen
+      ? player2
+      : hud.inventoryOpen
+        ? inventoryFor
+        : hud.pauseOpen
+          ? pausedBy
+          : null;
   menuNav.update(browsing ? [inputOf(browsing)] : inputs);
 
   if (phase === 'menu') {
@@ -766,10 +825,10 @@ function tick(realDt: number) {
   } else {
     // With a controller there's no mouse capture: play whenever no menu is open.
     const padPlay = (input.mode === 'gamepad' || IS_XBOX || twoPlayer) && (!menuNav.menuOpen || sideInventory);
-    if (padPlay && menuPressed && !resumed) {
-      pausedBy = twoPlayer && input2.pausePressed ? player2 : player;
+    if (padPlay && menuPressed && !resumed && !sideInventory) {
+      pausedBy = p2Menu ? player2 : player;
       hud.setPauseInventoryLabel(twoPlayer ? `${pausedBy.name}'s inventory` : 'Inventory');
-      hud.showPause(true);
+      hud.showPause(true, twoPlayer ? (pausedBy === player ? 'left' : 'right') : null);
     }
     let closedNow = false;
     if (hud.inventoryOpen) {
@@ -784,7 +843,7 @@ function tick(realDt: number) {
       playTime += realDt;
       const chooserInput = browsing ? inputOf(browsing) : null;
       if (inputs.some((i) => i !== chooserInput && i.mapPressed)) hud.showMap(!hud.mapOpen);
-      if (!hud.inventoryOpen) {
+      if (!hud.inventoryOpen && !hud.p2PickerOpen) {
         if (input.inventoryPressed && player.alive) openInventory(player);
         else if (twoPlayer && input2.inventoryPressed && player2.alive) openInventory(player2);
       }
@@ -844,6 +903,7 @@ function tick(realDt: number) {
   // A live controller readout on the pause screen, for tracking down stuck sticks or keys.
   if (hud.pauseOpen) hud.setPadDebug(input.debugText() + (twoPlayer ? ` · P2 ${input2.debugText()}` : ''));
   hud.update(kills);
+  hud.setButtonHints(IS_XBOX || twoPlayer || input.mode === 'gamepad');
   hud.views[0].update(player, revivingIn(player));
   if (twoPlayer) hud.views[1].update(player2, revivingIn(player2));
   for (const i of inputs) i.endFrame();
