@@ -1197,3 +1197,30 @@ button.shop-item:disabled {
 #shop-screen.side-right {
   left: 50%;
 }
+
+/* Dress your hero: the menu sits on the left so the hero shows on the right. */
+#outfit-screen {
+  justify-content: flex-start;
+  padding-left: 4vw;
+  background: linear-gradient(90deg, rgba(8, 6, 10, 0.85), rgba(8, 6, 10, 0.5) 50%, rgba(8, 6, 10, 0) 75%);
+}
+
+.outfit-panel {
+  max-width: 560px;
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
+.swatches span {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.swatches input:checked + span {
+  box-shadow: inset 0 0 0 3px #ffd36b, inset 0 0 0 5px #000;
+}
+
+.swatches label + label span {
+  border-left: 1px solid #000;
+}

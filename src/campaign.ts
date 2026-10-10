@@ -51,8 +51,10 @@ export interface Outpost {
   group: EnemyGroup;
   /** The garrison holding the outpost at the start. */
   garrison: Enemy[];
-  /** The counterattack that arrives once the garrison falls. */
-  wave: Enemy[];
+  /** The waves that arrive, one after another, once the garrison falls. */
+  waves: Enemy[][];
+  /** Which wave is attacking now. */
+  waveIndex: number;
   phase: 'garrison' | 'counterattack' | 'captured';
   checkpoint: Checkpoint;
 }
@@ -148,8 +150,8 @@ export class Campaign {
       const outposts = def.outposts.map((o): Outpost => {
         const group = new EnemyGroup();
         const garrison = o.spawns.map(([kind]) => member(createEnemy(scene, kind), group));
-        const wave = waveKinds(o).map((kind) => member(createEnemy(scene, kind), group));
-        return { def: o, group, garrison, wave, phase: 'garrison', checkpoint: checkpoint(o.id, o.name, o.x, o.z) };
+        const waves = (o.waves ?? [waveKinds(o)]).map((kinds) => kinds.map((kind) => member(createEnemy(scene, kind), group)));
+        return { def: o, group, garrison, waves, waveIndex: 0, phase: 'garrison', checkpoint: checkpoint(o.id, o.name, o.x, o.z) };
       });
       const patrol = new EnemyGroup();
       for (const kind of def.patrol.kinds) member(createEnemy(scene, kind), patrol);
@@ -273,7 +275,8 @@ export class Campaign {
     o.group.alerted = false;
     o.checkpoint.unlocked = captured;
     o.checkpoint.banner.setRaised(captured);
-    for (const e of o.wave) e.makeDormant();
+    o.waveIndex = 0;
+    for (const wave of o.waves) for (const e of wave) e.makeDormant();
     o.garrison.forEach((e, i) => {
       if (captured || !open) e.makeDormant();
       else e.spawn(o.def.x + o.def.spawns[i][1], o.def.z + o.def.spawns[i][2]);
@@ -319,7 +322,10 @@ export class Campaign {
       for (const o of t.outposts) {
         if (o.phase !== 'captured' && o.group.cleared) {
           if (o.phase === 'garrison') this.counterattack(o, ctx);
-          else this.capture(t, o);
+          else if (o.waveIndex < o.waves.length - 1) {
+            o.waveIndex++;
+            this.counterattack(o, ctx);
+          } else this.capture(t, o);
         }
       }
 
@@ -460,9 +466,10 @@ export class Campaign {
   private counterattack(o: Outpost, ctx: GameContext) {
     o.phase = 'counterattack';
     o.group.alerted = true;
-    o.wave.forEach((e, i) => {
+    const wave = o.waves[o.waveIndex];
+    wave.forEach((e, i) => {
       // They arrive from all sides at the edge of the clearing.
-      const a = (i / o.wave.length) * Math.PI * 2 + Math.random() * 0.6;
+      const a = (i / wave.length) * Math.PI * 2 + Math.random() * 0.6;
       const r = o.def.flatRadius - 2;
       const x = o.def.x + Math.sin(a) * r;
       const z = o.def.z + Math.cos(a) * r;
@@ -471,7 +478,9 @@ export class Campaign {
       if (!fromGround) ctx.particles.burst(new THREE.Vector3(x, e.pos.y + 1.4, z), 0x6a4a8a, 20, 4);
     });
     sfx.warHorn();
-    this.events.announce('Counterattack!', `Hold ${o.def.name}`);
+    // The garrison counts as the first wave.
+    const count = o.waves.length > 1 ? ` · Wave ${o.waveIndex + 2} of ${o.waves.length + 1}` : '';
+    this.events.announce(o.waveIndex === 0 ? 'Counterattack!' : 'Another wave!', `Hold ${o.def.name}${count}`);
   }
 
   private capture(t: Territory, o: Outpost) {

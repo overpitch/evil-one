@@ -90,6 +90,23 @@ Each leader drops its weapon where it falls, glowing in a beam of light. Walk in
 
 Older saves that already beat a leader get that leader's weapon automatically.
 
+## Fort Victory, gold and shops
+
+Fort Victory is your base, a walled fort on a big hill in the northeast. When you fall (both of you, in two-player), you and your army come back there with nothing lost. **Pause → Go to Fort Victory** takes the team there, and **Go back** returns you to where you were (not during boss fights).
+
+Every enemy you beat gives gold (leaders give a lot); in two-player each hero has their own. Step up to a stall's counter to shop:
+
+| Stall | Sells |
+|---|---|
+| Potion Shop | Healing potions (carry 5; D-pad up or H to drink, heals half your health) |
+| Armory | Leather, chainmail and plate armor: more health, shown on your hero |
+| Weaponsmith | Spear, twin daggers, battle axe, war hammer. Sell any weapon for half its price (and buy it back later), or trade the weapon in your hand for one worth the same or less |
+| Barracks | Hire soldiers, up to an army of 5 |
+
+## Outfits
+
+After naming a new hero you dress them: shirt, long shirt or chainmail; pants, shorts, or shorts with fishnet stockings (pink, or black for Player 2); and colors. Change it any time with **Pause → Outfit**.
+
 ## Saving
 
 Touching a standing red banner makes it your checkpoint: it saves the game, restores your health and replaces fallen soldiers. Capturing an outpost raises a new banner there. If you die, you return to your last checkpoint and lose any XP earned since.

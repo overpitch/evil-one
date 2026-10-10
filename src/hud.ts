@@ -8,6 +8,7 @@ import { sfx } from './audio';
 import { TERRITORIES } from './layout';
 import { WEAPONS, weaponIcon, type WeaponId } from './weapons';
 import type { Player2Hero } from './heroes';
+import { COLORS, DEFAULT_OUTFIT, LEGS, TOPS, type Outfit } from './outfit';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -65,7 +66,7 @@ const DEATH_TIPS = [
 /** One line in a shop: a heading, or something to buy, sell or trade. */
 export type ShopEntry = { heading: string } | { label: string; sub: string; disabled?: boolean; onClick: () => void };
 
-type Screen = 'title' | 'name' | 'intro' | 'options' | 'ending' | 'none';
+type Screen = 'title' | 'name' | 'outfit' | 'intro' | 'options' | 'ending' | 'none';
 
 /** "the Zombie King", for "Defeat the Zombie King". */
 function leaderTitle(id: string) {
@@ -214,6 +215,11 @@ export class Hud {
   onEquip?: (id: WeaponId) => void;
   onTogglePlayer2?: () => void;
   onShopClose?: () => void;
+  /** The outfit screen: every change (to dress the hero live), and Done. */
+  onOutfitChange?: (outfit: Outfit) => void;
+  onOutfitDone?: () => void;
+  /** Pause menu: change outfit. */
+  onOutfit?: () => void;
   /** Pause menu: teleport the team to Fort Victory, or back to where they were. */
   onGoToFort?: () => void;
   onGoBack?: () => void;
@@ -238,6 +244,7 @@ export class Hud {
     intro: $('intro-screen'),
     options: $('options-screen'),
     ending: $('ending-screen'),
+    outfit: $('outfit-screen'),
   };
   private readonly pause = $('pause-screen');
   private readonly death = $('death-screen');
@@ -347,6 +354,9 @@ export class Hud {
     $('pause-fort-btn').addEventListener('click', () => this.onGoToFort?.());
     $('pause-back-btn').addEventListener('click', () => this.onGoBack?.());
     $('shop-close-btn').addEventListener('click', () => this.onShopClose?.());
+    $('pause-outfit-btn').addEventListener('click', () => this.onOutfit?.());
+    $('outfit-done-btn').addEventListener('click', () => this.onOutfitDone?.());
+    this.buildOutfitOptions();
 
     // Who is Player 2?
     const p2Name = $<HTMLInputElement>('p2-name-input');
@@ -475,7 +485,12 @@ export class Hud {
   showScreen(screen: Screen) {
     for (const [name, el] of Object.entries(this.screens)) el.classList.toggle('hidden', name !== screen);
     const inMenus =
-      screen === 'title' || screen === 'name' || screen === 'intro' || screen === 'ending' || (screen === 'options' && this.optionsReturn === 'title');
+      screen === 'title' ||
+      screen === 'name' ||
+      screen === 'outfit' ||
+      screen === 'intro' ||
+      screen === 'ending' ||
+      (screen === 'options' && this.optionsReturn === 'title');
     this.hud.classList.toggle('hidden', inMenus);
     if (screen === 'name') {
       this.nameInput.value = storageGet(LAST_NAME_KEY) ?? '';
@@ -623,6 +638,60 @@ export class Hud {
       return b;
     });
     list.replaceChildren(...fresh);
+  }
+
+  // ---------- Outfit ----------
+
+  private outfit: Outfit = { ...DEFAULT_OUTFIT };
+  private readonly outfitInputs: { key: keyof Outfit; value: string | number; input: HTMLInputElement }[] = [];
+
+  get outfitOpen() {
+    return !$('outfit-screen').classList.contains('hidden');
+  }
+
+  /** Shows the outfit screen, set to `outfit` (Player 2's fishnets are black). */
+  showOutfit(outfit: Outfit, playerTwo = false) {
+    this.showScreen('outfit');
+    const nets = this.outfitInputs.find((i) => i.key === 'legs' && i.value === 'fishnets');
+    if (nets) nets.input.nextElementSibling!.textContent = `Shorts + ${playerTwo ? 'black' : 'pink'} fishnets`;
+    this.outfit = { ...outfit };
+    for (const { key, value, input } of this.outfitInputs) input.checked = this.outfit[key] === value;
+  }
+
+  /** Four rows of choices: top, shirt color, legs, pants color. Left/right on a controller changes a row. */
+  private buildOutfitOptions() {
+    const box = $('outfit-options');
+    const row = (key: keyof Outfit, label: string, choices: [string | number, string][], swatches: boolean) => {
+      const option = document.createElement('div');
+      option.className = 'option difficulty-option';
+      const id = `outfit-${key}-label`;
+      option.append(Object.assign(document.createElement('span'), { id, textContent: label }));
+      const group = document.createElement('div');
+      group.className = `segmented${swatches ? ' swatches' : ''}`;
+      group.setAttribute('role', 'radiogroup');
+      group.setAttribute('aria-labelledby', id);
+      for (const [value, name] of choices) {
+        const l = document.createElement('label');
+        l.title = name;
+        const input = Object.assign(document.createElement('input'), { type: 'radio', name: `outfit-${key}` });
+        const span = document.createElement('span');
+        if (swatches) span.style.background = `#${(value as number).toString(16).padStart(6, '0')}`;
+        else span.textContent = name;
+        input.addEventListener('change', () => {
+          (this.outfit as unknown as Record<string, string | number>)[key] = value;
+          this.onOutfitChange?.({ ...this.outfit });
+        });
+        l.append(input, span);
+        group.append(l);
+        this.outfitInputs.push({ key, value, input });
+      }
+      option.append(group);
+      box.append(option);
+    };
+    row('top', 'Top', TOPS, false);
+    row('shirt', 'Shirt color', COLORS, true);
+    row('legs', 'Legs', LEGS, false);
+    row('pants', 'Pants color', COLORS, true);
   }
 
   /** Pause menu: show "Go back" after teleporting to the fort. */

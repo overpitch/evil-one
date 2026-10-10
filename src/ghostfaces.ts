@@ -5,7 +5,8 @@ import { XP_REWARD } from './progression';
 import { easeOutCubic, lerp } from './util';
 import { sfx } from './audio';
 
-const GHOSTFACE_STATS: EnemyStats = { hp: 150, speed: 4.6, damage: 15, knockback: 4, scale: 1.05, poise: 30, windup: 0.42, reach: 1.9 };
+// Moderately tough: a lot of health, and it takes a few hits to knock one off balance.
+const GHOSTFACE_STATS: EnemyStats = { hp: 280, speed: 4.6, damage: 15, knockback: 4, scale: 1.05, poise: 60, windup: 0.42, reach: 1.9 };
 
 export function createGhostface(scene: THREE.Scene) {
   return new Ghostface(scene);

@@ -17,6 +17,7 @@ import { Campaign, type Objective } from './campaign';
 import { CAMP_BANNER, FORT, TERRITORIES, type ShopKind } from './layout';
 import { ARMOR, goldFor, loadGoods, MAX_ARMY, MAX_POTIONS, OUTPOST_GOLD, POTION_PRICE, SOLDIER_PRICE, type Goods } from './shop';
 import type { ShopEntry } from './hud';
+import { DEFAULT_OUTFIT, loadOutfit, type Outfit } from './outfit';
 import { WeaponDrops } from './loot';
 import { isWeaponId, STARTING_WEAPON, WEAPONS, weaponOf, type WeaponDef, type WeaponId } from './weapons';
 import { DIFFICULTIES, IS_XBOX, loadSettings, saveSettings, type Settings } from './settings';
@@ -241,6 +242,7 @@ function saveGame() {
     weapons: [...owned],
     weapon: player.weapon.id,
     goods: player.goods,
+    outfit: player.outfit,
     ...campaign.saveFields(),
     savedAt: Date.now(),
   });
@@ -253,7 +255,7 @@ function saveGame() {
  */
 function saveWeapons() {
   const save = loadSave();
-  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id, goods: player.goods });
+  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id, goods: player.goods, outfit: player.outfit });
   saveP2();
 }
 
@@ -267,7 +269,7 @@ let choosingP2 = false;
 /** Saves Player 2's hero: level, XP and weapons. */
 function saveP2() {
   if (!twoPlayer || !p2Hero) return;
-  p2Hero = { ...p2Hero, level: player2.level, xp: player2.xp, weapons: [...owned2], weapon: player2.weapon.id, goods: player2.goods };
+  p2Hero = { ...p2Hero, level: player2.level, xp: player2.xp, weapons: [...owned2], weapon: player2.weapon.id, goods: player2.goods, outfit: player2.outfit };
   saveHero(p2Hero);
 }
 
@@ -276,6 +278,7 @@ function becomeHero(hero: Player2Hero) {
   p2Hero = hero;
   choosingP2 = false;
   player2.goods = goodsFrom(hero.goods, hero.weapons);
+  player2.setOutfit(loadOutfit(hero.outfit ?? P2_OUTFIT));
   player2.loadHero(hero.name, hero.level, hero.xp);
   owned2.clear();
   owned2.add(STARTING_WEAPON);
@@ -339,6 +342,7 @@ function loadWeapons(save: SaveData | null) {
   player.setWeapon(isWeaponId(save?.weapon) && owned.has(save.weapon) ? save.weapon : STARTING_WEAPON);
   player.goods = goodsFrom(save?.goods, [...owned]);
   player.refreshStats();
+  if (save?.outfit || player.outfit !== DEFAULT_OUTFIT) player.setOutfit(loadOutfit(save?.outfit));
   drops.clear();
   placeMissingDrops(leaders);
 }
@@ -863,6 +867,51 @@ function updatePotions(browsing: Player | null) {
   }
 }
 
+// ---------- Outfits ----------
+
+/** The outfit picked for a new hero (before the game starts). */
+let pendingOutfit: Outfit = { ...DEFAULT_OUTFIT };
+/** Whose outfit the outfit screen is changing. */
+let outfitFor: Player = player;
+/** Player 2's heroes start in blue. */
+const P2_OUTFIT: Outfit = { ...DEFAULT_OUTFIT, shirt: 0x2a4fa3 };
+
+hud.onOutfitChange = (o) => {
+  outfitFor.setOutfit(o);
+  if (phase === 'menu') pendingOutfit = o;
+};
+hud.onOutfitDone = () => {
+  if (phase === 'menu') {
+    hud.showIntro(pendingName);
+    return;
+  }
+  // Changed from the pause menu: save it and play on.
+  if (outfitFor === player) saveWeapons();
+  else saveP2();
+  hud.showScreen('none');
+  lockPointer();
+};
+hud.onOutfit = () => {
+  outfitFor = twoPlayer ? pausedBy : player;
+  hud.showPause(false);
+  hud.showOutfit(outfitFor.outfit, outfitFor === player2);
+  if (document.pointerLockElement) document.exitPointerLock();
+};
+
+/** While dressing: the camera close in front of the hero, who turns slowly to show off the outfit. */
+function updateOutfitCamera(dt: number) {
+  const h = outfitFor;
+  h.yaw += dt * 0.6;
+  h.h.root.rotation.y = h.yaw;
+  const p = h.pos;
+  const view = Math.PI * 0.25; // the camera looks from this direction
+  const fx = Math.sin(view);
+  const fz = Math.cos(view);
+  camera.position.set(p.x + fx * 4.2, p.y + 1.7, p.z + fz * 4.2);
+  // Look a little to the hero's side so they stand to the right of the menu.
+  camera.lookAt(p.x - fz * 1.5, p.y + 1.1, p.z + fx * 1.5);
+}
+
 // ---------- Menu flow: title → (name → intro | continue) → play ----------
 
 /** Grabs the pointer. If the browser refuses, the pause screen offers a Resume button. */
@@ -878,7 +927,7 @@ function lockPointer() {
   input.requestLock();
   setTimeout(() => {
     const usingPad = input.mode === 'gamepad';
-    if (phase === 'playing' && !input.locked && !usingPad && !twoPlayer && player.alive && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen) hud.showPause(true);
+    if (phase === 'playing' && !input.locked && !usingPad && !twoPlayer && player.alive && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !hud.outfitOpen) hud.showPause(true);
   }, 1200);
 }
 
@@ -897,10 +946,13 @@ hud.onNewGame = () => {
 };
 hud.onNameChosen = (name) => {
   pendingName = name;
-  hud.showIntro(name);
+  pendingOutfit = { ...DEFAULT_OUTFIT };
+  player.setOutfit(pendingOutfit);
+  outfitFor = player;
+  hud.showOutfit(pendingOutfit);
 };
 hud.onBegin = () => {
-  const save = newSave(pendingName);
+  const save = { ...newSave(pendingName), outfit: pendingOutfit };
   writeSave(save);
   enterWorld(save);
   lockPointer();
@@ -927,12 +979,12 @@ input.onLockChange = (locked) => {
     pausedBy = player;
     hud.setPauseInventoryLabel(twoPlayer ? `${player.name}'s inventory` : 'Inventory');
   }
-  if (twoPlayer && !locked && phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !endingShown) {
+  if (twoPlayer && !locked && phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !hud.outfitOpen && !endingShown) {
     // Player 1 let go of the mouse: their own pause menu, on their half.
     hud.showPause(player.alive, 'left');
     return;
   }
-  if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !endingShown) hud.showPause(!locked && ctx.players.some((h) => h.alive));
+  if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !hud.outfitOpen && !endingShown) hud.showPause(!locked && ctx.players.some((h) => h.alive));
 };
 
 /** The war is won: release the mouse and roll the ending. */
@@ -1015,6 +1067,10 @@ if (testMode) {
 
 /** Slow orbit around the hero while the menus are up. */
 function updateMenuCamera(dt: number) {
+  if (hud.outfitOpen) {
+    updateOutfitCamera(dt);
+    return;
+  }
   menuOrbit += dt * 0.05;
   const p = player.pos;
   camera.position.set(p.x + Math.sin(menuOrbit) * 12, p.y + 4.2, p.z + Math.cos(menuOrbit) * 12);
@@ -1144,6 +1200,7 @@ function tick(realDt: number) {
       if (twoPlayer) floaters2.update(dt, camera2);
     }
     camCtrl.update(realDt, player.pos);
+    if (hud.outfitOpen) updateOutfitCamera(realDt);
     camera.updateMatrixWorld();
     if (twoPlayer) {
       camCtrl2.update(realDt, player2.pos);

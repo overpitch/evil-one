@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid, type HumanoidLook } from './character';
+import { DEFAULT_OUTFIT, dressHero, outfitLook, type Outfit } from './outfit';
 import type { Input } from './input';
 import type { GameContext, HitResult, Target } from './types';
 import { blockGooClimb, heightAt, resolveColliders } from './world';
@@ -84,7 +85,13 @@ const GOO_FACTOR = 0.5;
 const GOO_COLOR = new THREE.Color(0x4adf2a);
 
 export class Player implements Target {
-  readonly h: Humanoid;
+  /** The hero's body (rebuilt when the outfit changes). */
+  h: Humanoid;
+  outfit: Outfit = DEFAULT_OUTFIT;
+  private readonly baseLook: HumanoidLook;
+  /** What the hero carries in each hand, and armor: moved onto a rebuilt body. */
+  private readonly hand = new THREE.Group();
+  private readonly offhand = new THREE.Group();
   readonly pos = new THREE.Vector3();
   readonly vel = new THREE.Vector3();
   readonly radius = 0.4;
@@ -155,10 +162,11 @@ export class Player implements Target {
   private readonly tmp = new THREE.Vector3();
 
   constructor(scene: THREE.Scene, second = false) {
-    this.h = createHumanoid(second ? PLAYER2_LOOK : PLAYER_LOOK);
+    this.baseLook = second ? PLAYER2_LOOK : PLAYER_LOOK;
+    this.h = createHumanoid(this.baseLook);
     scene.add(this.h.root);
     // Weapons hang from the right fist; the business end points along the hand group's +Z.
-    const hand = new THREE.Group();
+    const hand = this.hand;
     hand.position.set(0, -0.64, 0);
     this.h.armR.add(hand);
     this.h.sword = hand;
@@ -169,7 +177,7 @@ export class Player implements Target {
       this.weaponModels.set(w.id, model);
     }
     // The left hand holds a second dagger for the Twin Daggers.
-    const offhand = new THREE.Group();
+    const offhand = this.offhand;
     offhand.position.set(0, -0.64, 0);
     this.h.armL.add(offhand);
     for (const w of WEAPONS) {
@@ -199,6 +207,30 @@ export class Player implements Target {
     );
     this.slamRing.visible = false;
     scene.add(this.slamRing);
+  }
+
+  /** Dresses the hero: rebuilds the body in the outfit's clothes and colors, keeping weapons and armor. */
+  setOutfit(outfit: Outfit) {
+    this.outfit = outfit;
+    const old = this.h;
+    const h = createHumanoid(outfitLook(this.baseLook, outfit));
+    // Player 2's fishnets are black.
+    dressHero(h, outfit, this.baseLook.skin, this.baseLook === PLAYER2_LOOK);
+    h.armR.add(this.hand);
+    h.sword = this.hand;
+    h.armL.add(this.offhand);
+    h.torso.add(this.armorPlate);
+    h.materials.push(this.armorMat);
+    h.root.position.copy(old.root.position);
+    h.root.rotation.copy(old.root.rotation);
+    h.root.visible = old.root.visible;
+    old.root.parent?.add(h.root);
+    old.root.removeFromParent();
+    // The old body's own geometry (not the shared weapon and armor pieces, which moved over).
+    old.root.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.geometry.attributes.color) o.geometry.dispose();
+    });
+    this.h = h;
   }
 
   /** Puts a different weapon in the hero's hand. */

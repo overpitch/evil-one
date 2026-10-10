@@ -68,6 +68,11 @@ export interface OutpostDef {
   flatRadius: number;
   /** [kind, offsetX, offsetZ] relative to the outpost center. */
   spawns: [EnemyKind, number, number][];
+  /**
+   * Waves that come one after another once the garrison falls (each must be
+   * beaten before the next). Default: one counterattack, most of the garrison again.
+   */
+  waves?: EnemyKind[][];
   /** Scenery for the clearing. */
   decor: 'graves' | 'ruins' | 'bones' | 'mushrooms' | 'huts' | 'hangingWood' | 'chapel' | 'mill' | 'pens' | 'spikes';
 }
@@ -337,26 +342,23 @@ export const TERRITORIES: TerritoryDef[] = [
         z: -84,
         flatRadius: 13,
         decor: 'spikes',
-        // Zomawi's gremlins swarm the courtyard, with five ghostfaces among them
-        // (the counterattack brings most of them back).
+        // Zomawi's gremlins hold the courtyard: three waves of ten, then five ghostfaces.
         spawns: [
-          ['ghostface', 0, 0],
-          ['gremlin', -2, 1.5],
-          ['gremlin', 2, 1.5],
-          ['ghostface', -4, -1],
-          ['gremlin', 4, -1],
-          ['gremlin', -3, -4],
-          ['ghostface', 4, 2],
-          ['gremlin', 3, -4],
-          ['gremlin', 0, -3],
-          ['ghostface', -5, 3],
-          ['gremlin', 5, 3],
-          ['gremlin', -1.5, 5],
-          ['ghostface', 0, 6],
-          ['gremlin', 1.5, 5],
-          ['gremlin', -6, -2],
-          ['gremlin', 6, -2],
-          ['gremlin', 0, -6],
+          ['gremlin', 0.0, 3.0],
+          ['gremlin', 3.2, 4.4],
+          ['gremlin', 2.9, 0.9],
+          ['gremlin', 5.2, -1.7],
+          ['gremlin', 1.8, -2.4],
+          ['gremlin', 0.0, -5.5],
+          ['gremlin', -1.8, -2.4],
+          ['gremlin', -5.2, -1.7],
+          ['gremlin', -2.9, 0.9],
+          ['gremlin', -3.2, 4.4],
+        ],
+        waves: [
+          new Array<EnemyKind>(10).fill('gremlin'),
+          new Array<EnemyKind>(10).fill('gremlin'),
+          new Array<EnemyKind>(5).fill('ghostface'),
         ],
       },
     ],
