@@ -55,6 +55,8 @@ const BOLT_DAMAGE = 14;
 const SLAM_TIME = 0.35;
 
 const ROLL_DURATION = 0.55;
+/** Longest any grab can hold the hero (the grabbers let go well before this). */
+const MAX_GRAB = 2.5;
 const ROLL_STAMINA = 22;
 const ARM_REST: [number, number] = [0, -0.35];
 
@@ -303,6 +305,11 @@ export class Player implements Target {
         break;
       case 'grabbed':
         // Held in a vampire's grip: pulled to the hold point, helpless.
+        // Grabs last under 2 s; if the grabber died mid-grab and never let go, break free.
+        if (this.stateTime > MAX_GRAB) {
+          this.release(forward.clone().negate());
+          break;
+        }
         this.vel.set(0, 0, 0);
         this.pos.x += (this.holdPoint.x - this.pos.x) * smoothing(15, dt);
         this.pos.z += (this.holdPoint.z - this.pos.z) * smoothing(15, dt);
