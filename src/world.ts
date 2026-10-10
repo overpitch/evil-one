@@ -80,10 +80,32 @@ function castleCoords(x: number, z: number) {
 }
 
 /** Walkable height of the castle's structures, or null outside them. */
+/** Two stairs climb out of the goo onto the platform, at the back left and back right. */
+const GOO_STAIR_ANGLES = [CASTLE.gateAngle + (Math.PI * 2) / 3, CASTLE.gateAngle - (Math.PI * 2) / 3];
+const GOO_STAIR_HALF = 1.3;
+/** The goo stairs run from the wall (low end) in to the platform's edge (top). */
+const GOO_STAIR_FOOT = CASTLE.r - 0.5;
+
+/** Height on a goo stair at (x, z), or null if not on one. */
+function gooStairHeight(x: number, z: number): number | null {
+  const dx = x - CASTLE.x;
+  const dz = z - CASTLE.z;
+  for (const a of GOO_STAIR_ANGLES) {
+    const along = dx * Math.sin(a) + dz * Math.cos(a);
+    const across = Math.abs(-dx * Math.cos(a) + dz * Math.sin(a));
+    if (across > GOO_STAIR_HALF || along < CASTLE_PLATFORM_R - 0.2 || along > GOO_STAIR_FOOT) continue;
+    const k = (along - CASTLE_PLATFORM_R) / (GOO_STAIR_FOOT - CASTLE_PLATFORM_R);
+    return CASTLE_TOP + (GOO_LEVEL - CASTLE_TOP) * Math.max(0, k);
+  }
+  return null;
+}
+
 function castleHeight(x: number, z: number): number | null {
   const { d, along, across } = castleCoords(x, z);
   if (d > CASTLE.r + STAIR_LEN + 2) return null;
   if (d <= CASTLE_PLATFORM_R) return CASTLE_TOP;
+  const stair = gooStairHeight(x, z);
+  if (stair !== null) return stair;
   if (across <= BRIDGE_HALF && along > 0) {
     if (along <= CASTLE.r + 0.8) return CASTLE_TOP; // the bridge, through the gap in the wall
     const k = (along - CASTLE.r - 0.8) / STAIR_LEN;
@@ -109,7 +131,31 @@ export function keepCameraInCastle(cam: THREE.Vector3, hero: THREE.Vector3) {
 /** In the goo pool at the bottom of the castle. */
 export function inGoo(x: number, z: number) {
   const { d, along, across } = castleCoords(x, z);
-  return d > CASTLE_PLATFORM_R + 0.3 && d < CASTLE.r && !(across <= BRIDGE_HALF && along > 0);
+  return d > CASTLE_PLATFORM_R + 0.3 && d < CASTLE.r && !(across <= BRIDGE_HALF && along > 0) && gooStairHeight(x, z) === null;
+}
+
+/**
+ * A hero down in the goo can't climb the platform's sides or the bridge
+ * (not even with a roll): the only way out is up the goo stairs.
+ * Undoes the part of a move from (fromX, fromZ) that would climb out.
+ */
+export function blockGooClimb(fromX: number, fromZ: number, pos: THREE.Vector3) {
+  // Down in the goo: low, inside the walls, and not on a stair.
+  const inPit = heightAt(fromX, fromZ) < 1 && castleCoords(fromX, fromZ).d < CASTLE.r && gooStairHeight(fromX, fromZ) === null;
+  if (!inPit) return;
+  const climbs = (x: number, z: number) => {
+    if (heightAt(x, z) < 1) return false;
+    const stair = gooStairHeight(x, z);
+    return stair === null || stair > 1.2; // onto a stair only at its foot
+  };
+  if (!climbs(pos.x, pos.z)) return;
+  // Slide along the edge if possible, otherwise stay put.
+  if (!climbs(pos.x, fromZ)) pos.z = fromZ;
+  else if (!climbs(fromX, pos.z)) pos.x = fromX;
+  else {
+    pos.x = fromX;
+    pos.z = fromZ;
+  }
 }
 
 /** Height everything walks on: the terrain, or the goo castle's platform, bridge and stairs. */
@@ -1028,6 +1074,25 @@ function addGooCastle(scene: THREE.Scene, rand: () => number) {
     step.rotation.y = yaw;
     step.castShadow = step.receiveShadow = true;
     scene.add(step);
+  }
+
+  // Stairs out of the goo, up to the platform, in pale stone so they're easy to spot.
+  const gooSteps = 9;
+  const paleA = lambert(0x9a94a6);
+  const paleB = lambert(0x7e7890);
+  for (const a of GOO_STAIR_ANGLES) {
+    for (let i = 0; i < gooSteps; i++) {
+      const along = CASTLE_PLATFORM_R + ((i + 0.5) / gooSteps) * (GOO_STAIR_FOOT - CASTLE_PLATFORM_R);
+      const sx = cx + Math.sin(a) * along;
+      const sz = cz + Math.cos(a) * along;
+      const top = (gooStairHeight(sx, sz) ?? 0) + 0.02;
+      const h = top - GOO_LEVEL + 0.3;
+      const step = new THREE.Mesh(new THREE.BoxGeometry(GOO_STAIR_HALF * 2, h, (GOO_STAIR_FOOT - CASTLE_PLATFORM_R) / gooSteps + 0.02), i % 2 ? paleA : paleB);
+      step.position.set(sx, top - h / 2, sz);
+      step.rotation.y = a;
+      step.castShadow = step.receiveShadow = true;
+      scene.add(step);
+    }
   }
 
   // Close the wall up to the bridge on both sides, so the bridge is the only way in.

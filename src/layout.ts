@@ -5,7 +5,9 @@
 export type ZombieKind = 'shambler' | 'runner' | 'brute';
 export type WitchKind = 'hexer' | 'broomWitch' | 'witchDecoy';
 export type VampireKind = 'thrall' | 'knight';
-export type EnemyKind = ZombieKind | WitchKind | VampireKind;
+/** Zomawi's own minions. */
+export type GremlinKind = 'gremlin';
+export type EnemyKind = ZombieKind | WitchKind | VampireKind | GremlinKind;
 
 export type TerritoryId = 'zombie' | 'witch' | 'vampire' | 'fortress';
 export type LeaderId = 'zombie-king' | 'witch-queen' | 'vampire-lord' | 'zomawi';
@@ -296,15 +298,20 @@ export const TERRITORIES: TerritoryDef[] = [
         z: -84,
         flatRadius: 13,
         decor: 'spikes',
+        // Zomawi's gremlins swarm the courtyard (and its counterattack).
         spawns: [
-          ['brute', 0, 0],
-          ['knight', -3, 2],
-          ['knight', 3, 2],
-          ['hexer', -5, -3],
-          ['hexer', 5, -3],
-          ['broomWitch', 0, 4],
-          ['runner', -2, 5],
-          ['runner', 2, 5],
+          ['gremlin', 0, 0],
+          ['gremlin', -2, 1.5],
+          ['gremlin', 2, 1.5],
+          ['gremlin', -4, -1],
+          ['gremlin', 4, -1],
+          ['gremlin', -3, -4],
+          ['gremlin', 3, -4],
+          ['gremlin', 0, -3],
+          ['gremlin', -5, 3],
+          ['gremlin', 5, 3],
+          ['gremlin', -1.5, 5],
+          ['gremlin', 1.5, 5],
         ],
       },
     ],
@@ -315,8 +322,8 @@ export const TERRITORIES: TerritoryDef[] = [
     leader: {
       id: 'zomawi',
       title: 'Zomawi',
-      minionKind: 'runner',
-      minionCount: 8,
+      minionKind: 'gremlin',
+      minionCount: 10,
       introLine: 'Another soldier of the human army. I was one, once. Kneel, and I will make you more.',
       deathLine: 'The witches... the grave... at last... it is quiet...',
     },

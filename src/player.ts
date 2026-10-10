@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid, type HumanoidLook } from './character';
 import type { Input } from './input';
 import type { GameContext, HitResult, Target } from './types';
-import { heightAt, resolveColliders } from './world';
+import { blockGooClimb, heightAt, resolveColliders } from './world';
 import { dampAngle, easeInOutQuad, easeOutCubic, lerp, smoothing, wrapAngle } from './util';
 import { sfx } from './audio';
 import { MAX_LEVEL, statsForLevel, xpToNext } from './progression';
@@ -340,9 +340,12 @@ export class Player implements Target {
     const k = smoothing(accel, dt);
     this.vel.x += (target.x - this.vel.x) * k;
     this.vel.z += (target.z - this.vel.z) * k;
+    const fromX = this.pos.x;
+    const fromZ = this.pos.z;
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
     resolveColliders(this.pos, this.radius, ctx.colliders);
+    blockGooClimb(fromX, fromZ, this.pos);
     this.pos.y = heightAt(this.pos.x, this.pos.z);
 
     // The hero always faces where the camera looks.

@@ -4,6 +4,7 @@ import type { EnemyKind, LeaderId } from './layout';
 import { createZombie } from './zombies';
 import { createWitch } from './witches';
 import { createVampire } from './vampires';
+import { createGremlin } from './gremlins';
 import { ZombieKing } from './zombieKing';
 import { WitchQueen } from './witchQueen';
 import { VampireLord } from './vampireLord';
@@ -23,6 +24,8 @@ export function createEnemy(scene: THREE.Scene, kind: EnemyKind): Enemy {
     case 'thrall':
     case 'knight':
       return createVampire(scene, kind);
+    case 'gremlin':
+      return createGremlin(scene);
   }
 }
 

@@ -101,7 +101,7 @@ None of the core actions need right-click or click-and-hold, so everything works
 A single fight that mixes all three natures at once:
 
 - **Human:** heavy sword combos and a charging lunge.
-- **Zombie:** raises zombie minions from the ground, takes a grab-and-bite attack, and regenerates slowly.
+- **Zombie:** summons packs of gremlins (small, fast, big-eared minions) from the ground, takes a grab-and-bite attack, and regenerates slowly.
 - **Witch:** fire bolts, homing hex orbs, and short levitation that keeps Zomawi out of reach.
 - As Zomawi's health drops, attacks come faster and Zomawi summons more often.
 - Your allied soldiers fight Zomawi's minions in the arena.

@@ -137,6 +137,11 @@ export class HeroView {
     }
   }
 
+  /** What to do next, in the bottom-right corner of this view. */
+  setObjective(text: string) {
+    if (this.el.objective.textContent !== text) this.el.objective.textContent = text;
+  }
+
   /** A marker over the objective, pinned to the edge of this view when it's off-screen. */
   setMarker(at: THREE.Vector3 | null, camera: THREE.Camera, from: THREE.Vector3) {
     const marker = this.el.marker;
@@ -193,7 +198,6 @@ export class Hud {
 
   private readonly hud = $('hud');
   private readonly kills = $('kills');
-  private readonly objective = $('objective');
   private readonly boss = $('boss');
   private readonly bossName = $('boss-name');
   private readonly bossFill = $('boss-fill');
@@ -720,9 +724,9 @@ export class Hud {
 
   // ---------- Objective ----------
 
-  /** Objective text at the top of the screen. */
+  /** What to do next, in each hero's view. */
   setObjective(text: string) {
-    if (this.objective.textContent !== text) this.objective.textContent = text;
+    for (const v of this.views) v.setObjective(text);
   }
 
   // ---------- Map ----------

@@ -991,9 +991,22 @@ button.weapon-card.locked {
 }
 
 /* Two-player: the shared objective sits just below the top, between the two views' status bars. */
-#hud.split .top-center {
-  top: 150px;
-  width: min(420px, 40vw);
+/* What to do next: the bottom-right corner of each hero's view. */
+.view-objective {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  max-width: min(380px, 45%);
+  padding: 6px 12px;
+  text-align: right;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  text-shadow: 0 2px 4px #000;
+}
+
+.view-objective:empty {
+  display: none;
 }
 
 .floaters {

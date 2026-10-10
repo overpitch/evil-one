@@ -52,7 +52,7 @@ const BITE_GLOW = new THREE.Color(0xff2a2a);
  *
  * - Human: greatsword combos (three swings, then a pause) and a charging lunge
  *   across the arena.
- * - Zombie: regenerates when left alone, raises the dead, and a biting grab.
+ * - Zombie: regenerates when left alone, summons gremlins from the ground, and a biting grab.
  * - Witch: fire-bolt fans and hex orbs; levitates out of reach to rain meteors,
  *   then lands exhausted.
  * - At 2/3 and 1/3 health it roars: a shockwave, more dead, and every

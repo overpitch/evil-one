@@ -28,7 +28,8 @@ const LAIR_KINDS: Record<TerritoryId, EnemyKind[]> = {
   zombie: ['shambler', 'runner', 'shambler', 'brute', 'runner', 'shambler', 'brute', 'runner'],
   witch: ['hexer', 'broomWitch', 'hexer', 'hexer', 'broomWitch', 'hexer', 'broomWitch', 'hexer'],
   vampire: ['thrall', 'knight', 'thrall', 'thrall', 'knight', 'thrall', 'knight', 'thrall'],
-  fortress: ['shambler', 'hexer', 'thrall', 'brute', 'broomWitch', 'knight', 'runner', 'thrall'],
+  // Zomawi's sanctum: a swarm of gremlins.
+  fortress: ['gremlin', 'gremlin', 'gremlin', 'gremlin', 'gremlin', 'gremlin', 'gremlin', 'gremlin', 'gremlin', 'gremlin'],
 };
 
 interface Lair {

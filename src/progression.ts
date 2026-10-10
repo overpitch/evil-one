@@ -36,6 +36,7 @@ export const XP_REWARD: Record<EnemyKind | LeaderId, number> = {
   witchDecoy: 0,
   thrall: 40,
   knight: 90,
+  gremlin: 20,
   'zombie-king': 400,
   'witch-queen': 500,
   'vampire-lord': 600,
