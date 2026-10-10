@@ -36,6 +36,8 @@ Then go to http://localhost:5173, choose **New Game**, name your hero, and click
 | Dodge roll | `Space` |
 | Sprint | `Shift` |
 | Map | `M` |
+| Inventory (choose your weapon) | `I` |
+| Quick-swap weapon | `1`–`5` |
 | Pause | `Esc` |
 
 **Controller (Xbox layout):**
@@ -48,6 +50,8 @@ Then go to http://localhost:5173, choose **New Game**, name your hero, and click
 | Dodge roll | A |
 | Sprint (hold) | B or click the left stick |
 | Map | View |
+| Inventory | Y |
+| Quick-swap weapon | D-pad left / right |
 | Pause | Menu |
 | Menus | D-pad or left stick to choose, A to select, B to go back |
 
@@ -71,6 +75,20 @@ Your squad heals between fights. When you enter an enemy land, fallen soldiers a
 2. A land's leader waits behind a **sealed gate** that opens only when all five of its outposts are captured.
 3. When all three leaders are dead, the seal on **Zomawi's fortress** in the far south breaks. Storm the courtyard, then face Zomawi in the sanctum.
 4. Defeat Zomawi to see the ending. Afterwards you can keep exploring the liberated world.
+
+## Weapons and inventory
+
+Each leader drops its weapon where it falls, glowing in a beam of light. Walk into it to claim it; it goes straight into your hand. Open the **Inventory** (`I`, the controller's Y button, or the pause menu) to switch between the weapons you own. The game waits while it's open.
+
+| Slot | Weapon | From | What it does |
+|---|---|---|---|
+| 1 | Soldier's Sword | You start with it | Balanced. |
+| 2 | Gravebreaker | The Zombie King | Slow, heavy bone maul. The third swing of a combo slams the ground and hits every enemy around you. |
+| 3 | Hexfire Staff | The Witch Queen | Weaker swings, but every swing throws a fire bolt, and the third throws three. |
+| 4 | Bloodfang | The Vampire Lord | Very fast saber. Every hit heals you a little. |
+| 5 | Doomblade | Zomawi | Huge greatsword with long reach. Heals on every hit, and the third swing slams the ground. |
+
+Older saves that already beat a leader get that leader's weapon automatically.
 
 ## Saving
 
@@ -117,6 +135,8 @@ Open http://localhost:5173/?test to skip the menus and play without pointer lock
 | `src/music.ts` | Procedural soundtrack: title, exploring (per land), battle, boss, victory |
 | `src/hud.ts` | Status bars, messages, objective marker, all menu screens |
 | `src/map.ts` | The world map |
+| `src/weapons.ts` | The five weapons: stats, special powers, 3D models and icons |
+| `src/loot.ts` | Leader weapons lying on the ground, waiting to be claimed |
 | `src/progression.ts` | XP curve, level stat gains, XP rewards |
 | `src/floaters.ts` | Floating damage numbers and +XP text |
 | `src/settings.ts` | Player options (sensitivity, invert look) |

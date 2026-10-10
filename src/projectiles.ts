@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import type { GameContext, Target } from './types';
+import type { Enemy } from './enemy';
 import { heightAt } from './world';
 import { sfx, volumeAt } from './audio';
 
-export type ProjectileKind = 'firebolt' | 'hexorb' | 'meteor';
+export type ProjectileKind = 'firebolt' | 'hexorb' | 'meteor' | 'hexfire';
 
 interface Spec {
   speed: number;
@@ -19,6 +20,8 @@ const SPECS: Record<ProjectileKind, Spec> = {
   firebolt: { speed: 16, radius: 0.45, life: 2.5, color: 0xff7a1a, core: 0xfff0a0, homing: 0 },
   hexorb: { speed: 6.5, radius: 0.55, life: 4.5, color: 0x9a4aff, core: 0xe6ccff, homing: 1.6 },
   meteor: { speed: 18, radius: 0.7, life: 3, color: 0xff5a1a, core: 0xffe08a, homing: 0 },
+  // The hero's own bolts, from the Hexfire Staff.
+  hexfire: { speed: 24, radius: 0.4, life: 1.3, color: 0xc06aff, core: 0xfff0ff, homing: 0 },
 };
 
 const METEOR_BLAST = 2.4;
@@ -33,6 +36,8 @@ interface Projectile {
   life: number;
   damage: number;
   homingTarget: Target | null;
+  /** Thrown by the hero: hurts enemies instead of humans. */
+  friendly: boolean;
   /** Meteors fall onto a marked spot. */
   impact: THREE.Vector3;
   mesh: THREE.Group;
@@ -69,6 +74,7 @@ export class Projectiles {
         life: 0,
         damage: 0,
         homingTarget: null,
+        friendly: false,
         impact: new THREE.Vector3(),
         mesh,
         marker,
@@ -85,6 +91,7 @@ export class Projectiles {
     p.life = spec.life;
     p.damage = damage;
     p.homingTarget = null;
+    p.friendly = false;
     p.mesh.visible = true;
     p.mesh.scale.setScalar(spec.radius * 0.6);
     const [outer, inner] = p.mesh.children as THREE.Mesh[];
@@ -102,6 +109,16 @@ export class Projectiles {
     if (spread) aim.applyAxisAngle(new THREE.Vector3(0, 1, 0), spread);
     p.vel.copy(aim).multiplyScalar(SPECS[kind].speed);
     if (kind === 'hexorb') p.homingTarget = target;
+    p.mesh.position.copy(p.pos);
+  }
+
+  /** The hero's fire bolt: flies straight along `dir` and hurts the first enemy it meets. */
+  fireFriendly(from: THREE.Vector3, dir: THREE.Vector3, damage: number) {
+    const p = this.take('hexfire', damage);
+    if (!p) return;
+    p.friendly = true;
+    p.pos.copy(from);
+    p.vel.copy(dir).setY(0).normalize().multiplyScalar(SPECS.hexfire.speed);
     p.mesh.position.copy(p.pos);
   }
 
@@ -151,8 +168,18 @@ export class Projectiles {
         continue;
       }
 
+      if (p.friendly) {
+        const enemy = this.enemyAt(p, ctx);
+        if (enemy) {
+          const dir = this.tmp.copy(p.vel).normalize();
+          enemy.takeHit(p.damage, dir, 5, false, ctx, ctx.player);
+          ctx.particles.burst(p.pos, spec.color, 14, 4);
+          this.kill(p);
+          continue;
+        }
+      }
       // Hit a human?
-      const hit = this.humanAt(p, ctx);
+      const hit = p.friendly ? null : this.humanAt(p, ctx);
       if (hit) {
         const result = hit.takeDamage(p.damage, p.pos, ctx);
         if (p.kind === 'hexorb' && result === 'hit' && hit === ctx.player) ctx.player.applySlow(SLOW_SECONDS);
@@ -170,6 +197,20 @@ export class Projectiles {
   /** Removes every spell (respawn, fight over). */
   clear() {
     for (const p of this.items) if (p.active) this.kill(p);
+  }
+
+  private enemyAt(p: Projectile, ctx: GameContext): Enemy | null {
+    const r = SPECS[p.kind].radius;
+    for (const e of ctx.enemies) {
+      if (!e.alive || e.flying) continue;
+      const dx = p.pos.x - e.pos.x;
+      const dz = p.pos.z - e.pos.z;
+      if (Math.abs(dx) > 4 || Math.abs(dz) > 4) continue;
+      const tall = 2 * e.h.root.scale.y;
+      if (p.pos.y < e.pos.y - 0.3 || p.pos.y > e.pos.y + e.airY + tall) continue;
+      if (Math.hypot(dx, dz) < r + e.radius) return e;
+    }
+    return null;
   }
 
   private humanAt(p: Projectile, ctx: GameContext): Target | null {

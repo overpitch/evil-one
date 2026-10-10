@@ -5,6 +5,8 @@ import { DIFFICULTIES, type Difficulty, type Graphics, type Settings } from './s
 import type { SaveData } from './save';
 import { drawMap, type MapData } from './map';
 import { sfx } from './audio';
+import { TERRITORIES } from './layout';
+import { WEAPONS, weaponIcon, type WeaponDef, type WeaponId } from './weapons';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -21,6 +23,8 @@ const CONTROLS: [string, string][] = [
   ['Space', 'Dodge roll'],
   ['Shift', 'Sprint'],
   ['M', 'Map'],
+  ['I', 'Inventory (choose your weapon)'],
+  ['1 – 5', 'Quick-swap weapon'],
   ['Esc', 'Pause'],
 ];
 
@@ -42,6 +46,14 @@ const DEATH_TIPS = [
 ];
 
 type Screen = 'title' | 'name' | 'intro' | 'options' | 'ending' | 'none';
+
+/** "the Zombie King", for "Defeat the Zombie King". */
+function leaderTitle(id: string) {
+  const title = TERRITORIES.find((t) => t.leader.id === id)?.leader.title ?? id;
+  return title.replace(/^The /, 'the ');
+}
+
+const pips = (n: number) => '●'.repeat(n) + '○'.repeat(5 - n);
 
 export interface EndingStats {
   name: string;
@@ -94,6 +106,9 @@ export class Hud {
   onKeepExploring?: () => void;
   onQuitToTitle?: () => void;
   onEndingTitle?: () => void;
+  onInventory?: () => void;
+  onInventoryClose?: () => void;
+  onEquip?: (id: WeaponId) => void;
 
   readonly floaterLayer = $('floaters');
 
@@ -130,6 +145,9 @@ export class Hud {
   private readonly mapCanvas = $<HTMLCanvasElement>('map-canvas');
   private readonly nameInput = $<HTMLInputElement>('name-input');
   private readonly nameError = $('name-error');
+  private readonly inventory = $('inventory-screen');
+  private readonly weaponCards = new Map<WeaponId, HTMLButtonElement>();
+  private shownWeapon: WeaponId | null = null;
 
   private settings: Settings;
   /** Where the Options screen's Back button returns to. */
@@ -153,7 +171,7 @@ export class Hud {
       const pad = document.createElement('p');
       pad.className = 'pad-controls';
       pad.textContent =
-        'Controller: left stick move · right stick look · RT or X attack · LT or LB block · A roll · B sprint · View map · Menu pause';
+        'Controller: left stick move · right stick look · RT or X attack · LT or LB block · A roll · B sprint · Y inventory · D-pad left/right swap weapon · View map · Menu pause';
       dl.after(pad);
     }
 
@@ -219,6 +237,34 @@ export class Hud {
       if (e.target === this.pause) this.onResume?.();
     });
     $('respawn-btn').addEventListener('click', () => this.onRespawn?.());
+
+    // Inventory: one card per weapon, built once and updated in place (so controller focus stays put).
+    $('pause-inventory-btn').addEventListener('click', () => this.onInventory?.());
+    $('inventory-close-btn').addEventListener('click', () => this.onInventoryClose?.());
+    const grid = $('weapon-grid');
+    WEAPONS.forEach((w, i) => {
+      const card = document.createElement('button');
+      card.className = 'weapon-card';
+      card.style.setProperty('--accent', `#${w.color.toString(16).padStart(6, '0')}`);
+      card.innerHTML = `
+        <span class="weapon-slot">${i + 1}</span>
+        <span class="weapon-icon">${weaponIcon(w)}</span>
+        <span class="weapon-name"></span>
+        <span class="weapon-from"></span>
+        <span class="weapon-stats">
+          <span>Damage</span><span class="pips">${pips(w.pips.damage)}</span>
+          <span>Speed</span><span class="pips">${pips(w.pips.speed)}</span>
+          <span>Reach</span><span class="pips">${pips(w.pips.reach)}</span>
+        </span>
+        <span class="weapon-desc"></span>
+        <span class="weapon-badge">Equipped</span>`;
+      card.addEventListener('click', () => {
+        if (card.classList.contains('locked')) return;
+        this.onEquip?.(w.id);
+      });
+      grid.append(card);
+      this.weaponCards.set(w.id, card);
+    });
 
     // Options
     const sens = $<HTMLInputElement>('sens');
@@ -325,6 +371,42 @@ export class Hud {
     this.optionsReturn = from;
     this.showPause(false);
     this.showScreen('options');
+  }
+
+  get inventoryOpen() {
+    return !this.inventory.classList.contains('hidden');
+  }
+
+  showInventory(show: boolean) {
+    this.inventory.classList.toggle('hidden', !show);
+  }
+
+  /** Fills in the inventory cards: what's owned, what's still to win, and what's in hand. */
+  renderInventory(owned: ReadonlySet<WeaponId>, equipped: WeaponId, usingPad: boolean) {
+    for (const w of WEAPONS) {
+      const card = this.weaponCards.get(w.id)!;
+      const have = owned.has(w.id);
+      card.classList.toggle('locked', !have);
+      card.classList.toggle('equipped', w.id === equipped);
+      card.querySelector('.weapon-name')!.textContent = have ? w.name : '???';
+      card.querySelector('.weapon-from')!.textContent = !w.from
+        ? 'Your own blade'
+        : have
+          ? `Won from ${leaderTitle(w.from)}`
+          : `Defeat ${leaderTitle(w.from)} to claim it`;
+      card.querySelector('.weapon-desc')!.textContent = have ? w.description : '';
+    }
+    $('inventory-hint').textContent = usingPad
+      ? 'A · Equip    B or Y · Back to battle    In battle, the d-pad left/right swaps weapons'
+      : 'Click a weapon to equip it    I or Esc · Back to battle    In battle, keys 1–5 swap weapons';
+  }
+
+  /** The weapon shown under the status bars. */
+  setWeapon(w: WeaponDef) {
+    if (this.shownWeapon === w.id) return;
+    this.shownWeapon = w.id;
+    $('weapon-tag-icon').innerHTML = weaponIcon(w);
+    $('weapon-tag-name').textContent = w.name;
   }
 
   get pauseOpen() {

@@ -6,6 +6,7 @@ import { heightAt, resolveColliders } from './world';
 import { dampAngle, easeInOutQuad, easeOutCubic, lerp, smoothing, wrapAngle } from './util';
 import { sfx } from './audio';
 import { MAX_LEVEL, statsForLevel, xpToNext } from './progression';
+import { STARTING_WEAPON, WEAPON_BY_ID, WEAPONS, type WeaponDef, type WeaponId } from './weapons';
 
 type State = 'move' | 'attack' | 'roll' | 'stagger' | 'grabbed' | 'dead';
 
@@ -36,6 +37,23 @@ const SWINGS: Swing[] = [
   { dur: 0.65, hitStart: 0.42, hitEnd: 0.62, damage: 40, knockback: 9, arc: 0.85, reach: 2.7, lunge: 4.5, stamina: 14, heavy: true, from: [-0.15, -2.9], to: [-0.1, -0.55] },
 ];
 
+/** The combo as swung with a particular weapon. */
+function swingsFor(w: WeaponDef): Swing[] {
+  const m = w.swing;
+  return SWINGS.map((s) => ({
+    ...s,
+    dur: s.dur * m.dur,
+    damage: s.damage * m.damage,
+    knockback: s.knockback * m.knockback,
+    reach: s.reach + m.reach,
+    arc: s.arc + m.arc,
+    stamina: s.stamina * m.stamina,
+  }));
+}
+
+const BOLT_DAMAGE = 14;
+const SLAM_TIME = 0.35;
+
 const ROLL_DURATION = 0.55;
 const ROLL_STAMINA = 22;
 const ARM_REST: [number, number] = [0, -0.35];
@@ -49,7 +67,6 @@ const PLAYER_LOOK = {
   belt: 0x5a3c22,
   armor: 0xb8c0c8,
   plume: 0xd23a2a,
-  sword: true,
 };
 
 const HURT_COLOR = new THREE.Color(0xff2020);
@@ -80,6 +97,16 @@ export class Player implements Target {
   /** Seconds left of a witch's slowing hex. */
   slowTimer = 0;
 
+  weapon: WeaponDef = WEAPON_BY_ID[STARTING_WEAPON];
+  private swings = swingsFor(this.weapon);
+  /** One model per weapon, all held in the sword hand; only the equipped one shows. */
+  private readonly weaponModels = new Map<WeaponId, THREE.Group>();
+  /** The ground-slam ring (Gravebreaker, Doomblade). */
+  private readonly slamRing: THREE.Mesh;
+  private slamTime = -1;
+  private slamRadius = 1;
+  private specialDone = false;
+
   state: State = 'move';
   stateTime = 0;
 
@@ -109,6 +136,34 @@ export class Player implements Target {
   constructor(scene: THREE.Scene) {
     this.h = createHumanoid(PLAYER_LOOK);
     scene.add(this.h.root);
+    // Weapons hang from the right fist; the business end points along the hand group's +Z.
+    const hand = new THREE.Group();
+    hand.position.set(0, -0.64, 0);
+    this.h.armR.add(hand);
+    this.h.sword = hand;
+    for (const w of WEAPONS) {
+      const model = w.build();
+      model.visible = w === this.weapon;
+      hand.add(model);
+      this.weaponModels.set(w.id, model);
+    }
+    this.slamRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.8, 1, 40).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    this.slamRing.visible = false;
+    scene.add(this.slamRing);
+  }
+
+  /** Puts a different weapon in the hero's hand. */
+  setWeapon(id: WeaponId) {
+    const w = WEAPON_BY_ID[id];
+    if (!w || w === this.weapon) return;
+    this.weapon = w;
+    this.swings = swingsFor(w);
+    for (const [wid, model] of this.weaponModels) model.visible = wid === id;
+    // A swing in progress finishes as a fresh start with the new weapon.
+    if (this.state === 'attack') this.setState('move');
   }
 
   get alive() {
@@ -207,9 +262,9 @@ export class Player implements Target {
         break;
       }
       case 'attack': {
-        const sw = SWINGS[this.combo];
+        const sw = this.swings[this.combo];
         const t = this.stateTime / sw.dur;
-        if (this.attackBuffer > 0 && this.combo < SWINGS.length - 1 && t > 0.15) {
+        if (this.attackBuffer > 0 && this.combo < this.swings.length - 1 && t > 0.15) {
           this.comboQueued = true;
           this.attackBuffer = 0;
         }
@@ -220,6 +275,10 @@ export class Player implements Target {
           if (!this.swingSounded) {
             this.swingSounded = true;
             sfx.swing(sw.heavy);
+          }
+          if (!this.specialDone) {
+            this.specialDone = true;
+            this.weaponSpecial(sw, ctx);
           }
           if (t <= sw.hitEnd) this.checkHits(sw, ctx);
         }
@@ -272,6 +331,7 @@ export class Player implements Target {
     if (this.alive && this.sinceHurt > regenDelay) this.hp = Math.min(this.maxHp, this.hp + regenRate * dt);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.5);
     this.slowTimer = Math.max(0, this.slowTimer - dt);
+    this.updateSlamRing(dt);
 
     this.animate(dt);
   }
@@ -360,7 +420,8 @@ export class Player implements Target {
     this.comboQueued = false;
     this.swingHits.clear();
     this.swingSounded = false;
-    this.spendStamina(SWINGS[index].stamina);
+    this.specialDone = false;
+    this.spendStamina(this.swings[index].stamina);
     this.setState('attack');
   }
 
@@ -386,7 +447,10 @@ export class Player implements Target {
       }
       this.swingHits.add(e);
       const dir = new THREE.Vector3(dx, 0, dz).normalize();
-      if (e.takeHit(Math.round(sw.damage * this.damageMultiplier), dir, sw.knockback, sw.heavy, ctx, this) === 'parried') {
+      const damage = Math.round(sw.damage * this.damageMultiplier);
+      const outcome = e.takeHit(damage, dir, sw.knockback, sw.heavy, ctx, this);
+      if (outcome === 'hit') this.lifesteal(damage, ctx);
+      if (outcome === 'parried') {
         // Knocked back by a parry: the swing ends and the hero reels.
         ctx.floatText(new THREE.Vector3(e.pos.x, e.pos.y + 2, e.pos.z), 'Parried!', 'damage');
         ctx.addShake(0.2);
@@ -395,6 +459,72 @@ export class Player implements Target {
         this.setState('stagger');
         return;
       }
+    }
+  }
+
+  // ---------- Weapon powers ----------
+
+  /** Bloodfang and the Doomblade heal the hero for part of the damage each hit deals. */
+  private lifesteal(damage: number, ctx: GameContext) {
+    const share = this.weapon.special.lifesteal;
+    if (!share || this.hp >= this.maxHp) return;
+    const heal = Math.max(1, Math.round(damage * share));
+    this.hp = Math.min(this.maxHp, this.hp + heal);
+    ctx.floatText(new THREE.Vector3(this.pos.x, this.pos.y + 2.1, this.pos.z), `+${heal}`, 'heal');
+  }
+
+  /** Fires once per swing, as the blow lands: fire bolts, or the third swing's ground slam. */
+  private weaponSpecial(sw: Swing, ctx: GameContext) {
+    const special = this.weapon.special;
+    const fx = Math.sin(this.yaw);
+    const fz = Math.cos(this.yaw);
+    if (special.bolts) {
+      const from = new THREE.Vector3(this.pos.x + fx * 0.9, this.pos.y + 1.25, this.pos.z + fz * 0.9);
+      const damage = Math.round(BOLT_DAMAGE * this.damageMultiplier);
+      const spread = sw.heavy ? [-0.22, 0, 0.22] : [0];
+      for (const a of spread) {
+        const dir = new THREE.Vector3(Math.sin(this.yaw + a), 0, Math.cos(this.yaw + a));
+        ctx.projectiles.fireFriendly(from, dir, damage);
+      }
+      sfx.cast(0.7);
+    }
+    if (special.slam && sw.heavy) {
+      const at = new THREE.Vector3(this.pos.x + fx * 1.4, this.pos.y, this.pos.z + fz * 1.4);
+      const { radius, share } = special.slam;
+      const damage = Math.round(sw.damage * this.damageMultiplier * share);
+      for (const e of ctx.enemies) {
+        if (!e.alive || e.flying || this.swingHits.has(e)) continue;
+        const dx = e.pos.x - at.x;
+        const dz = e.pos.z - at.z;
+        const d = Math.hypot(dx, dz);
+        if (d > radius + e.radius) continue;
+        // The swing itself will hit whatever is right in front; the slam catches the rest.
+        const dir = d > 1e-3 ? new THREE.Vector3(dx / d, 0, dz / d) : new THREE.Vector3(fx, 0, fz);
+        this.swingHits.add(e);
+        if (e.takeHit(damage, dir, 7, true, ctx, this) === 'hit') this.lifesteal(damage, ctx);
+      }
+      ctx.particles.burst(new THREE.Vector3(at.x, at.y + 0.3, at.z), 0x8a7a5a, 22, 6);
+      ctx.particles.burst(new THREE.Vector3(at.x, at.y + 0.3, at.z), this.weapon.color, 14, 5);
+      ctx.addShake(0.6);
+      ctx.hitStop(0.1);
+      sfx.explode(0.8);
+      this.slamRadius = radius;
+      this.slamTime = 0;
+      this.slamRing.position.set(at.x, at.y + 0.15, at.z);
+      (this.slamRing.material as THREE.MeshBasicMaterial).color.set(this.weapon.color);
+      this.slamRing.visible = true;
+    }
+  }
+
+  private updateSlamRing(dt: number) {
+    if (this.slamTime < 0) return;
+    this.slamTime += dt;
+    const k = Math.min(this.slamTime / SLAM_TIME, 1);
+    this.slamRing.scale.setScalar(0.5 + easeOutCubic(k) * this.slamRadius);
+    (this.slamRing.material as THREE.MeshBasicMaterial).opacity = 0.85 * (1 - k);
+    if (k >= 1) {
+      this.slamTime = -1;
+      this.slamRing.visible = false;
     }
   }
 
@@ -443,7 +573,7 @@ export class Player implements Target {
         }
         break;
       case 'attack':
-        this.poseSwing(SWINGS[this.combo], this.stateTime / SWINGS[this.combo].dur);
+        this.poseSwing(this.swings[this.combo], this.stateTime / this.swings[this.combo].dur);
         break;
       case 'roll': {
         const t = Math.min(this.stateTime / ROLL_DURATION, 1);

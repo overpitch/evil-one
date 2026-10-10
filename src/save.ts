@@ -11,6 +11,10 @@ export interface SaveData {
   captured: string[];
   /** Ids of defeated army leaders (and 'zomawi' once the game is won). */
   leaders: string[];
+  /** Weapons the hero has claimed (older saves: worked out from the defeated leaders). */
+  weapons?: string[];
+  /** The weapon in the hero's hand. */
+  weapon?: string;
   /** Seconds of play so far. */
   playTime?: number;
   savedAt: number;
@@ -24,7 +28,7 @@ export function useTestSaveSlot() {
 }
 
 export function newSave(name: string): SaveData {
-  return { version: 1, name, level: 1, xp: 0, kills: 0, checkpoint: 'camp', captured: [], leaders: [], savedAt: Date.now() };
+  return { version: 1, name, level: 1, xp: 0, kills: 0, checkpoint: 'camp', captured: [], leaders: [], weapons: ['sword'], weapon: 'sword', savedAt: Date.now() };
 }
 
 export function loadSave(): SaveData | null {

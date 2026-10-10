@@ -14,7 +14,9 @@ import { initAudio, musicOutput, setVolumes, sfx } from './audio';
 import { Music, type Mood, type Theme } from './music';
 import { MenuNavigator } from './menuNav';
 import { Campaign, type Objective } from './campaign';
-import { CAMP_BANNER } from './layout';
+import { CAMP_BANNER, TERRITORIES } from './layout';
+import { WeaponDrops } from './loot';
+import { isWeaponId, STARTING_WEAPON, WEAPONS, weaponOf, type WeaponDef, type WeaponId } from './weapons';
 import { DIFFICULTIES, IS_XBOX, loadSettings, saveSettings, type Settings } from './settings';
 import { loadSave, newSave, useTestSaveSlot, writeSave, type SaveData } from './save';
 import type { MapData } from './map';
@@ -46,6 +48,7 @@ const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerH
 const world = createWorld(scene);
 const particles = new Particles(scene);
 const projectiles = new Projectiles(scene);
+const drops = new WeaponDrops(scene);
 const player = new Player(scene);
 const camCtrl = new ThirdPersonCamera(camera);
 const input = new Input(renderer.domElement);
@@ -85,6 +88,8 @@ let pendingName = '';
 /** Seconds of play (only counts while actually playing). */
 let playTime = 0;
 let endingShown = false;
+/** Weapons the hero has claimed. */
+const owned = new Set<WeaponId>([STARTING_WEAPON]);
 
 const ctx: GameContext = {
   scene,
@@ -133,6 +138,10 @@ const campaign = new Campaign(scene, world, enemies, {
   },
   bossStarted: (name) => hud.showBoss(name),
   bossEnded: () => hud.showBoss(null),
+  leaderDefeated: (id, at) => {
+    const w = weaponOf(id);
+    if (w && !owned.has(w.id)) drops.place(w.id, at.x, at.z);
+  },
   victory: () => {
     saveGame();
     setTimeout(showEnding, 2500);
@@ -159,9 +168,71 @@ function saveGame() {
     xp: player.xp,
     kills,
     playTime: Math.round(playTime),
+    weapons: [...owned],
+    weapon: player.weapon.id,
     ...campaign.saveFields(),
     savedAt: Date.now(),
   });
+}
+
+/**
+ * Records a weapon change in the save straight away, without saving
+ * anything else (XP and kills still only count from the last checkpoint).
+ */
+function saveWeapons() {
+  const save = loadSave();
+  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id });
+}
+
+/** Sets up the hero's weapons from a save, and puts unclaimed leader weapons back in their arenas. */
+function loadWeapons(save: SaveData | null) {
+  owned.clear();
+  owned.add(STARTING_WEAPON);
+  const leaders = save?.leaders ?? [];
+  // Saves from before weapons existed: every defeated leader's weapon is already yours.
+  const claimed = save?.weapons ?? leaders.map((id) => weaponOf(id)?.id);
+  for (const id of claimed) if (isWeaponId(id)) owned.add(id);
+  player.setWeapon(isWeaponId(save?.weapon) && owned.has(save.weapon) ? save.weapon : STARTING_WEAPON);
+  drops.clear();
+  for (const id of leaders) {
+    const w = weaponOf(id);
+    const land = TERRITORIES.find((t) => t.leader.id === id);
+    if (w && land && !owned.has(w.id)) drops.place(w.id, land.arena.x, land.arena.z);
+  }
+}
+
+function equip(w: WeaponDef, announce: boolean) {
+  if (!owned.has(w.id) || player.weapon === w) return;
+  player.setWeapon(w.id);
+  sfx.block(0.5);
+  saveWeapons();
+  if (announce) hud.announce(w.name, 'Equipped');
+  if (hud.inventoryOpen) hud.renderInventory(owned, player.weapon.id, input.mode === 'gamepad');
+}
+
+/** Walked into a fallen leader's weapon: it's yours, and in your hand. */
+function claimWeapon(w: WeaponDef) {
+  owned.add(w.id);
+  player.setWeapon(w.id);
+  saveWeapons();
+  sfx.levelUp();
+  camCtrl.addShake(0.2);
+  const how = input.mode === 'gamepad' ? 'Press Y' : 'Press I';
+  hud.announce(`New weapon: ${w.name}`, `${how} to open your inventory and switch weapons`, true);
+}
+
+function openInventory() {
+  if (phase !== 'playing' || !player.alive || endingShown) return;
+  hud.showMap(false);
+  hud.showPause(false);
+  hud.renderInventory(owned, player.weapon.id, input.mode === 'gamepad');
+  hud.showInventory(true);
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+
+function closeInventory() {
+  hud.showInventory(false);
+  lockPointer();
 }
 
 /** Fallen soldiers are replaced by fresh ones in formation behind the hero. */
@@ -179,6 +250,8 @@ function reinforceSquad(everyone = false) {
 function enterWorld(save: SaveData) {
   hud.fadeIn();
   player.loadHero(save.name, save.level, save.xp);
+  loadWeapons(save);
+  hud.showInventory(false);
   kills = save.kills;
   playTime = save.playTime ?? 0;
   endingShown = false;
@@ -276,7 +349,7 @@ function lockPointer() {
   input.requestLock();
   setTimeout(() => {
     const usingPad = input.mode === 'gamepad';
-    if (phase === 'playing' && !input.locked && !usingPad && player.alive && !hud.optionsOpen) hud.showPause(true);
+    if (phase === 'playing' && !input.locked && !usingPad && player.alive && !hud.optionsOpen && !hud.inventoryOpen) hud.showPause(true);
   }, 1200);
 }
 
@@ -304,6 +377,9 @@ hud.onBegin = () => {
   lockPointer();
 };
 hud.onResume = lockPointer;
+hud.onInventory = openInventory;
+hud.onInventoryClose = closeInventory;
+hud.onEquip = (id) => equip(WEAPONS.find((w) => w.id === id)!, false);
 hud.onRespawn = () => {
   enterWorld(loadSave() ?? newSave(player.name));
   lockPointer();
@@ -315,7 +391,7 @@ hud.onSettings = (s) => {
 };
 input.onLockChange = (locked) => {
   if (!locked) hud.showMap(false);
-  if (phase === 'playing' && !hud.optionsOpen && !endingShown) hud.showPause(!locked && player.alive);
+  if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !endingShown) hud.showPause(!locked && player.alive);
 };
 
 /** The war is won: release the mouse and roll the ending. */
@@ -349,9 +425,11 @@ function returnToTitle() {
   hud.showPause(false);
   hud.showMap(false);
   hud.showDeath(false);
+  hud.showInventory(false);
   if (document.pointerLockElement) document.exitPointerLock();
   const save = loadSave();
   campaign.load(save);
+  loadWeapons(save);
   const spot = respawnPoint(CAMP_BANNER);
   player.reset(spot.x, spot.z);
   reinforceSquad(true);
@@ -370,6 +448,7 @@ window.addEventListener('resize', () => {
 // The world behind the title screen reflects the saved game.
 const existingSave = loadSave();
 campaign.load(existingSave);
+loadWeapons(existingSave);
 const campSpot = respawnPoint(CAMP_BANNER);
 player.reset(campSpot.x, campSpot.z);
 reinforceSquad(true);
@@ -439,9 +518,14 @@ function tick(realDt: number) {
     // With a controller there's no mouse capture: play whenever no menu is open.
     const padPlay = (input.mode === 'gamepad' || IS_XBOX) && !menuNav.menuOpen;
     if (padPlay && input.pausePressed && !resumed) hud.showPause(true);
-    if ((input.locked || padPlay || testMode) && !endingShown) {
+    if (hud.inventoryOpen) {
+      // The game waits while the hero picks a weapon.
+      if (input.inventoryPressed || input.escapePressed) closeInventory();
+    } else if ((input.locked || padPlay || testMode) && !endingShown) {
       playTime += realDt;
       if (input.mapPressed) hud.showMap(!hud.mapOpen);
+      if (input.inventoryPressed && player.alive) openInventory();
+      updateWeaponSwap();
       camCtrl.applyInput(input, realDt);
       let dt = realDt;
       // Hit-stop: freeze the action for a few frames when a blow lands.
@@ -455,6 +539,8 @@ function tick(realDt: number) {
       separateBodies();
       campaign.update(dt, ctx);
       projectiles.update(dt, ctx);
+      const claimed = drops.update(dt, player.alive ? player.pos : null, particles);
+      if (claimed) claimWeapon(claimed);
       particles.update(dt);
       floaters.update(dt, camera);
     }
@@ -476,7 +562,7 @@ function tick(realDt: number) {
       hud.showDeath(true);
     }
 
-    const objective = campaign.objective(player.pos, player.level);
+    const objective = weaponObjective() ?? campaign.objective(player.pos, player.level);
     hud.setObjective(objective.text, objective.at, camera, player.pos);
     const fight = campaign.activeFight;
     if (fight) hud.setBossHealth(fight.leader.healthFraction);
@@ -488,7 +574,31 @@ function tick(realDt: number) {
   updateXboxTip(realDt);
   for (const z of enemies) z.updateBar(camera);
   hud.update(player, kills);
+  hud.setWeapon(player.weapon);
   input.endFrame();
+}
+
+/** Number keys pick a weapon; the d-pad steps through the ones you own. */
+function updateWeaponSwap() {
+  if (!player.alive) return;
+  const slot = input.weaponSlotPressed;
+  if (slot !== null && WEAPONS[slot]) {
+    if (owned.has(WEAPONS[slot].id)) equip(WEAPONS[slot], true);
+    else hud.announce('Not yet yours', `Defeat its owner to claim slot ${slot + 1}`);
+  }
+  const step = input.weaponCyclePressed;
+  if (step !== 0 && owned.size > 1) {
+    const mine = WEAPONS.filter((w) => owned.has(w.id));
+    const i = mine.indexOf(player.weapon);
+    equip(mine[(i + step + mine.length) % mine.length], true);
+  }
+}
+
+/** A fallen leader's weapon waiting to be picked up comes before everything else. */
+function weaponObjective(): Objective | null {
+  const near = drops.nearest(player.pos);
+  if (!near || campaign.activeFight) return null;
+  return { text: `Claim ${near.weapon.name}`, at: near.at };
 }
 
 // ---------- Xbox ----------
@@ -592,6 +702,7 @@ Object.assign(window, {
     enemies,
     campaign,
     projectiles,
+    drops,
     music,
     /** The running audio context (null until the first click). */
     audio: () => musicOutput()?.ac ?? null,

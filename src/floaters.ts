@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type FloaterKind = 'damage' | 'heavy' | 'xp';
+export type FloaterKind = 'damage' | 'heavy' | 'xp' | 'heal';
 
 interface Floater {
   el: HTMLDivElement;
@@ -10,7 +10,7 @@ interface Floater {
   active: boolean;
 }
 
-const LIFE: Record<FloaterKind, number> = { damage: 0.8, heavy: 1, xp: 1.4 };
+const LIFE: Record<FloaterKind, number> = { damage: 0.8, heavy: 1, xp: 1.4, heal: 0.9 };
 const POOL_SIZE = 40;
 
 /** Damage numbers and "+XP" text that rise from a point in the world and fade. */

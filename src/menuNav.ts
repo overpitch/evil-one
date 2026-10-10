@@ -1,11 +1,12 @@
 import type { Input } from './input';
 
 /** Menu screens, topmost first: the first visible one gets controller focus. */
-const SCREENS = ['ending-screen', 'death-screen', 'options-screen', 'pause-screen', 'name-screen', 'intro-screen', 'title-screen'];
+const SCREENS = ['ending-screen', 'death-screen', 'options-screen', 'inventory-screen', 'pause-screen', 'name-screen', 'intro-screen', 'title-screen'];
 
 /** What the B button does on each screen. */
 const BACK_BUTTONS: Record<string, string[]> = {
   'options-screen': ['options-back-btn'],
+  'inventory-screen': ['inventory-close-btn'],
   'pause-screen': ['resume-btn'],
   'title-screen': ['confirm-no-btn'],
 };

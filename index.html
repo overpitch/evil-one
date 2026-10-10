@@ -22,6 +22,7 @@
         <div class="bar stamina" id="st-bar"><div class="fill" id="st-fill"></div></div>
         <div class="bar xp"><div class="fill" id="xp-fill"></div></div>
         <div class="xp-text" id="xp-text"></div>
+        <div class="weapon-tag" id="weapon-tag"><span class="weapon-tag-icon" id="weapon-tag-icon"></span><span id="weapon-tag-name"></span></div>
         <div class="status-effect hidden" id="slowed">Hexed · slowed</div>
       </div>
       <div class="top-center">
@@ -33,7 +34,7 @@
       </div>
       <div class="top-right">
         <div class="kills" id="kills"></div>
-        <div class="hint">M · Map</div>
+        <div class="hint" id="hud-hint">M · Map &nbsp; I · Inventory</div>
       </div>
       <div class="crosshair"></div>
       <div id="floaters"></div>
@@ -151,10 +152,24 @@
         <h2>Paused</h2>
         <div class="menu row">
           <button id="resume-btn">Resume</button>
+          <button id="pause-inventory-btn" class="secondary">Inventory</button>
           <button id="pause-options-btn" class="secondary">Options</button>
           <button id="quit-btn" class="secondary" title="Progress since your last checkpoint will be lost">Quit to title</button>
         </div>
         <dl class="controls" data-controls></dl>
+      </div>
+    </div>
+
+    <!-- Inventory -->
+    <div id="inventory-screen" class="overlay screen hidden">
+      <div class="panel inventory">
+        <h2>Inventory</h2>
+        <p class="subtitle">Choose your weapon. Each leader you defeat drops a new one.</p>
+        <div class="weapon-grid" id="weapon-grid"></div>
+        <div class="menu row">
+          <button id="inventory-close-btn">Back to battle</button>
+        </div>
+        <p class="inventory-hint" id="inventory-hint"></p>
       </div>
     </div>
 

@@ -2,7 +2,7 @@ import { IS_XBOX } from './settings';
 
 /** Keys the browser should never act on while playing (e.g. Space scrolling the page). */
 const GAME_KEYS = new Set([
-  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyK', 'KeyJ', 'KeyE', 'KeyM',
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyK', 'KeyJ', 'KeyE', 'KeyM', 'KeyI',
   'Space', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
 ]);
 
@@ -236,6 +236,27 @@ export class Input {
 
   get mapPressed() {
     return this.pressed.has('KeyM') || this.padWasPressed(PAD.VIEW);
+  }
+
+  /** I, or the controller's Y button: open or close the inventory. */
+  get inventoryPressed() {
+    return this.pressed.has('KeyI') || this.padWasPressed(PAD.Y);
+  }
+
+  /** Quick weapon swap while playing: number keys pick a slot, the d-pad steps through. */
+  get weaponSlotPressed(): number | null {
+    for (let i = 1; i <= 9; i++) if (this.pressed.has(`Digit${i}`)) return i - 1;
+    return null;
+  }
+
+  get weaponCyclePressed(): -1 | 0 | 1 {
+    if (this.padWasPressed(PAD.RIGHT)) return 1;
+    if (this.padWasPressed(PAD.LEFT)) return -1;
+    return 0;
+  }
+
+  get escapePressed() {
+    return this.pressed.has('Escape');
   }
 
   get pausePressed() {

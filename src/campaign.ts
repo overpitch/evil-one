@@ -66,6 +66,8 @@ export interface CampaignEvents {
   enteredTerritory(t: Territory): void;
   bossStarted(name: string): void;
   bossEnded(): void;
+  /** A leader has fallen where it stood: its weapon drops there. */
+  leaderDefeated(id: string, at: THREE.Vector3): void;
   /** Zomawi has fallen: the end of the war. */
   victory(): void;
   save(): void;
@@ -474,6 +476,7 @@ export class Campaign {
       if (e.alive && (t.def.requires || e.faction === t.leader.faction)) e.collapse(ctx);
     }
     this.events.bossEnded();
+    this.events.leaderDefeated(t.def.leader.id, t.leader.pos.clone());
     this.events.say(t.def.leader.title, t.def.leader.deathLine);
     t.victoryTimer = 3;
     this.events.save();

@@ -48,6 +48,8 @@ None of the core actions need right-click or click-and-hold, so everything works
 | Sprint | `Shift` |
 | Interact / talk | `E` |
 | Map | `M` |
+| Inventory | `I` |
+| Quick-swap weapon | `1`–`5` |
 | Pause | `Esc` |
 
 ## Combat
@@ -57,6 +59,16 @@ None of the core actions need right-click or click-and-hold, so everything works
 - **Dodge roll:** brief invincibility; uses stamina.
 - **Stamina** refills when you aren't using it.
 - **Hit feedback:** enemies flash, get knocked back, and the camera shakes slightly.
+
+## Weapons
+
+- Each leader drops its own weapon when it falls. Walk into it to claim it.
+- The **Inventory** screen shows every weapon slot (locked ones say which leader to beat) and lets you equip any weapon you own.
+- **Soldier's Sword** (start): balanced.
+- **Gravebreaker** (Zombie King): slow and heavy; the combo's third swing slams the ground around you.
+- **Hexfire Staff** (Witch Queen): weaker swings that each throw a fire bolt; the third throws three.
+- **Bloodfang** (Vampire Lord): very fast; each hit heals you.
+- **Doomblade** (Zomawi): huge reach and damage, heals on hit, and slams the ground.
 
 ## Progression
 
@@ -130,6 +142,7 @@ A single fight that mixes all three natures at once:
 4. ✅ **Remaining territories:** witch and vampire armies and their leaders. Recommended levels: Zombie Lands 1, Witch Lands 5, Vampire Lands 8.
 5. ✅ **Zomawi:** the fortress, the final fight, and the ending. Also: 5 outposts per land with counterattack waves, and leader arenas sealed until a land's outposts are all captured.
 6. ✅ **Polish:** music, sound effects, balancing, title screen.
+7. ✅ **Weapons:** each leader drops a weapon with its own power; an Inventory screen to switch.
 
 ## Open questions (defaults are used until decided)
 
