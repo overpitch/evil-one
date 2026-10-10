@@ -7,6 +7,7 @@ import { dampAngle, easeInOutQuad, easeOutCubic, lerp, smoothing, wrapAngle } fr
 import { sfx } from './audio';
 import { MAX_LEVEL, statsForLevel, xpToNext } from './progression';
 import { STARTING_WEAPON, WEAPON_BY_ID, WEAPONS, type WeaponDef, type WeaponId } from './weapons';
+import { ARMOR, MAX_POTIONS, newGoods, POTION_HEAL, type Goods } from './shop';
 
 type State = 'move' | 'attack' | 'roll' | 'stagger' | 'grabbed' | 'dead';
 
@@ -48,6 +49,8 @@ function swingsFor(w: WeaponDef): Swing[] {
     reach: s.reach + m.reach,
     arc: s.arc + m.arc,
     stamina: s.stamina * m.stamina,
+    // The War Hammer: every blow knocks enemies off their feet.
+    heavy: s.heavy || !!w.special.stagger,
   }));
 }
 
@@ -106,7 +109,14 @@ export class Player implements Target {
   /** Wading in the goo castle's goo (slow, and it burns). */
   inGoo = false;
 
+  /** Gold, potions, armor and hired soldiers (bought at Fort Victory). */
+  goods: Goods = newGoods();
   weapon: WeaponDef = WEAPON_BY_ID[STARTING_WEAPON];
+  /** Armor worn over the shirt (its color shows the kind). */
+  private readonly armorPlate: THREE.Group;
+  private readonly armorMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+  /** Second weapons for the left hand (twin daggers). */
+  private readonly offhandModels = new Map<WeaponId, THREE.Group>();
   private swings = swingsFor(this.weapon);
   /** One model per weapon, all held in the sword hand; only the equipped one shows. */
   private readonly weaponModels = new Map<WeaponId, THREE.Group>();
@@ -158,6 +168,31 @@ export class Player implements Target {
       hand.add(model);
       this.weaponModels.set(w.id, model);
     }
+    // The left hand holds a second dagger for the Twin Daggers.
+    const offhand = new THREE.Group();
+    offhand.position.set(0, -0.64, 0);
+    this.h.armL.add(offhand);
+    for (const w of WEAPONS) {
+      if (!w.offhand) continue;
+      const model = w.build();
+      model.visible = false;
+      offhand.add(model);
+      this.offhandModels.set(w.id, model);
+    }
+    // Armor: a breastplate over the shirt and plates on the shoulders.
+    this.armorPlate = new THREE.Group();
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.5, 0.38), this.armorMat);
+    plate.position.y = 0.38;
+    this.armorPlate.add(plate);
+    for (const side of [1, -1]) {
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.16, 0.3), this.armorMat);
+      pad.position.set(0.37 * side, 0.6, 0);
+      this.armorPlate.add(pad);
+    }
+    this.armorPlate.traverse((o) => (o.castShadow = true));
+    this.armorPlate.visible = false;
+    this.h.torso.add(this.armorPlate);
+    this.h.materials.push(this.armorMat);
     this.slamRing = new THREE.Mesh(
       new THREE.RingGeometry(0.8, 1, 40).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }),
@@ -173,6 +208,7 @@ export class Player implements Target {
     this.weapon = w;
     this.swings = swingsFor(w);
     for (const [wid, model] of this.weaponModels) model.visible = wid === id;
+    for (const [wid, model] of this.offhandModels) model.visible = wid === id;
     // A swing in progress finishes as a fresh start with the new weapon.
     if (this.state === 'attack') this.setState('move');
   }
@@ -221,9 +257,28 @@ export class Player implements Target {
     this.applyLevelStats();
   }
 
+  /** Health, stamina and damage for the level, plus armor's extra health; shows the armor. */
+  refreshStats() {
+    const before = this.maxHp;
+    this.applyLevelStats();
+    if (this.maxHp > before) this.hp += this.maxHp - before;
+    this.hp = Math.min(this.hp, this.maxHp);
+  }
+
+  /** Drinks a healing potion, if carrying one and hurt. Returns whether it did. */
+  drinkPotion(): boolean {
+    if (!this.alive || this.goods.potions <= 0 || this.hp >= this.maxHp) return false;
+    this.goods.potions = Math.min(this.goods.potions, MAX_POTIONS) - 1;
+    this.hp = Math.min(this.maxHp, this.hp + this.maxHp * POTION_HEAL);
+    return true;
+  }
+
   private applyLevelStats() {
     const stats = statsForLevel(this.level);
-    this.maxHp = stats.maxHp;
+    const armor = ARMOR[this.goods.armor] ?? ARMOR[0];
+    this.armorPlate.visible = armor.health > 0;
+    if (armor.health > 0) this.armorMat.color.set(armor.color);
+    this.maxHp = stats.maxHp + armor.health;
     this.maxStamina = stats.maxStamina;
     this.damageMultiplier = stats.damageMultiplier;
   }

@@ -5,6 +5,7 @@ import { createZombie } from './zombies';
 import { createWitch } from './witches';
 import { createVampire } from './vampires';
 import { createGremlin } from './gremlins';
+import { createGhostface } from './ghostfaces';
 import { ZombieKing } from './zombieKing';
 import { WitchQueen } from './witchQueen';
 import { VampireLord } from './vampireLord';
@@ -26,6 +27,8 @@ export function createEnemy(scene: THREE.Scene, kind: EnemyKind): Enemy {
       return createVampire(scene, kind);
     case 'gremlin':
       return createGremlin(scene);
+    case 'ghostface':
+      return createGhostface(scene);
   }
 }
 

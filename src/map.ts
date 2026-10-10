@@ -1,4 +1,4 @@
-import { HUMAN_CAMP, TERRITORIES, type TerritoryId } from './layout';
+import { FORT, HUMAN_CAMP, TERRITORIES, type TerritoryId } from './layout';
 import { WORLD_HALF } from './world';
 
 export interface MapData {
@@ -65,6 +65,7 @@ export function drawMap(canvas: HTMLCanvasElement, data: MapData) {
     region(t.center.x, t.center.z, t.center.r, REGION_FILL[t.id][free ? 1 : 0], t.name, sub, t.id === 'zombie');
   }
   region(HUMAN_CAMP.x, HUMAN_CAMP.z, 14, 'rgba(160, 120, 70, 0.6)', 'Human Camp');
+  region(FORT.x, FORT.z, FORT.r + 2, 'rgba(90, 120, 200, 0.6)', 'Fort Victory', 'Your base · shops');
 
   const icon = (x: number, z: number, glyph: string, color: string, px = size / 26) => {
     g.font = `${px}px Georgia, serif`;

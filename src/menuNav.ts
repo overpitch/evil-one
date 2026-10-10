@@ -1,13 +1,14 @@
 import type { Input } from './input';
 
 /** Menu screens, topmost first: the first visible one gets controller focus. */
-const SCREENS = ['ending-screen', 'death-screen', 'options-screen', 'p2-screen', 'inventory-screen', 'pause-screen', 'name-screen', 'intro-screen', 'title-screen'];
+const SCREENS = ['ending-screen', 'death-screen', 'options-screen', 'p2-screen', 'shop-screen', 'inventory-screen', 'pause-screen', 'name-screen', 'intro-screen', 'title-screen'];
 
 /** What the B button does on each screen. */
 const BACK_BUTTONS: Record<string, string[]> = {
   'options-screen': ['options-back-btn'],
   'inventory-screen': ['inventory-close-btn'],
   'p2-screen': ['p2-back-btn', 'p2-cancel-btn'],
+  'shop-screen': ['shop-close-btn'],
   'pause-screen': ['resume-btn'],
   'title-screen': ['confirm-no-btn'],
 };
@@ -26,6 +27,9 @@ function visible(el: HTMLElement) {
  */
 export class MenuNavigator {
   private focused: HTMLElement | null = null;
+  /** Where the highlight was, so it stays there when a screen redraws its buttons (shops). */
+  private lastScreen: HTMLElement | null = null;
+  private lastIndex = 0;
 
   /** True when a menu screen is up (so the game shouldn't take controller input). */
   get menuOpen() {
@@ -55,11 +59,17 @@ export class MenuNavigator {
     }
     if (!this.focused || !items.includes(this.focused)) {
       // A new screen (or the first controller input): just show where the highlight starts.
-      this.setFocus(items[0]);
+      // The same screen redrawn: keep the highlight in the same place.
+      const same = screen === this.lastScreen;
+      this.setFocus(items[same ? Math.min(this.lastIndex, items.length - 1) : 0]);
+      this.lastScreen = screen;
+      this.lastIndex = items.indexOf(this.focused!);
       return;
     }
     const current = this.focused;
     const index = items.indexOf(current);
+    this.lastScreen = screen;
+    this.lastIndex = index;
 
     const nav = pads.map((i) => i.nav).find((d) => d !== null) ?? null;
     switch (nav) {

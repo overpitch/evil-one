@@ -4,7 +4,7 @@ import { EnemyGroup, type Enemy } from './enemy';
 import { createEnemy, createLeader } from './enemies';
 import type { GameContext } from './types';
 import { CASTLE_PLATFORM_R, inGoo, territoryWeight, type World } from './world';
-import { ARMY_LEADERS, CAMP_BANNER, TERRITORIES, type EnemyKind, type OutpostDef, type TerritoryDef, type TerritoryId } from './layout';
+import { ARMY_LEADERS, CAMP_BANNER, FORT, TERRITORIES, type EnemyKind, type OutpostDef, type TerritoryDef, type TerritoryId } from './layout';
 import type { SaveData } from './save';
 import { OUTPOST_XP } from './progression';
 import { sfx } from './audio';
@@ -116,6 +116,8 @@ export class Campaign {
   current: Checkpoint;
 
   private readonly camp: Checkpoint;
+  /** Fort Victory's banner: where fallen heroes come back. */
+  readonly fortCheckpoint: Checkpoint;
   private touching: string | null = null;
   /** The enemy land the hero is in (null when outside them all). */
   private inLand: TerritoryId | null = null;
@@ -141,6 +143,7 @@ export class Campaign {
     };
 
     this.camp = this.current = checkpoint(CAMP_BANNER.id, CAMP_BANNER.name, CAMP_BANNER.x, CAMP_BANNER.z);
+    this.fortCheckpoint = checkpoint(FORT.banner.id, FORT.banner.name, FORT.banner.x, FORT.banner.z);
     for (const def of TERRITORIES) {
       const outposts = def.outposts.map((o): Outpost => {
         const group = new EnemyGroup();
@@ -221,6 +224,8 @@ export class Campaign {
     for (const id of save?.leaders ?? []) this.leaders.add(id);
 
     this.camp.unlocked = true;
+    this.fortCheckpoint.unlocked = true;
+    this.fortCheckpoint.banner.setRaised(true);
     this.camp.banner.setRaised(true);
     for (const t of this.territories) {
       const open = this.isOpen(t);

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, mulberry32, smoothing } from './util';
-import { HUMAN_CAMP, TERRITORIES, VAMPIRE_LAND, VILLAGE_RUINS, type OutpostDef, type TerritoryDef, type TerritoryId } from './layout';
+import { FORT, HUMAN_CAMP, TERRITORIES, VAMPIRE_LAND, VILLAGE_RUINS, type OutpostDef, type ShopKind, type TerritoryDef, type TerritoryId } from './layout';
+import { createHumanoid, type HumanoidLook } from './character';
 
 export const WORLD_HALF = 150;
 
@@ -42,6 +43,7 @@ const dirZ = (angle: number) => Math.cos(angle);
 /** Areas kept flat for camps, outposts and arenas: [x, z, radius]. */
 const FLAT_ZONES: [number, number, number][] = [
   [HUMAN_CAMP.x, HUMAN_CAMP.z, 18],
+  [FORT.x, FORT.z, FORT.hillTop],
   ...TERRITORIES.flatMap((t): [number, number, number][] => [
     ...t.outposts.map((o): [number, number, number] => [o.x, o.z, o.flatRadius]),
     [t.arena.x, t.arena.z, t.arena.r + 6],
@@ -172,12 +174,19 @@ function terrainHeight(x: number, z: number): number {
     const reach = r + 14;
     if (dx * dx + dz * dz < reach * reach) flat = Math.min(flat, smoothstep(r, reach, Math.hypot(dx, dz)));
   }
-  if (flat === 0) return 0;
+  if (flat === 0) return fortHill(x, z);
   const h =
     Math.sin(x * 0.045) * Math.cos(z * 0.038) * 3.2 +
     Math.sin(x * 0.11 + 1.3) * Math.sin(z * 0.09 + 0.7) * 1.3 +
     Math.sin((x + z) * 0.21) * 0.3;
-  return h * flat;
+  return h * flat + fortHill(x, z);
+}
+
+/** Fort Victory's hill: flat on top, sloping gently down all around. */
+function fortHill(x: number, z: number) {
+  const d = Math.hypot(x - FORT.x, z - FORT.z);
+  if (d >= FORT.hillFoot) return 0;
+  return FORT.hillHeight * (1 - smoothstep(FORT.hillTop, FORT.hillFoot, d));
 }
 
 /** 0 outside a territory, 1 deep inside it. */
@@ -203,7 +212,7 @@ function biomeAt(x: number, z: number): { id: TerritoryId | null; weight: number
 /** Keeps scenery out of camps, outposts, gates and arenas. */
 function nearLandmark(x: number, z: number) {
   const near = (px: number, pz: number, r: number) => Math.hypot(x - px, z - pz) < r;
-  if (near(HUMAN_CAMP.x, HUMAN_CAMP.z, 22)) return true;
+  if (near(HUMAN_CAMP.x, HUMAN_CAMP.z, 22) || near(FORT.x, FORT.z, FORT.r + 8)) return true;
   return TERRITORIES.some(
     (t) =>
       t.outposts.some((o) => near(o.x, o.z, o.flatRadius - 1)) ||
@@ -359,6 +368,7 @@ export function createWorld(scene: THREE.Scene) {
   addPools(scene, rand);
   addSpires(scene, rand, colliders);
   const animated: ((time: number) => void)[] = [addCamp(scene, colliders)];
+  addFort(scene, colliders);
   for (const t of TERRITORIES) {
     for (const o of t.outposts) {
       const anim = addOutpostDecor(scene, rand, colliders, o);
@@ -924,6 +934,109 @@ function addOutpostDecor(scene: THREE.Scene, rand: () => number, colliders: Coll
     }
     default:
       return null;
+  }
+}
+
+// ---------- Fort Victory ----------
+
+/** Canopy color and shopkeeper for each stall. */
+const STALL_LOOKS: Record<ShopKind, { canopy: number; keeper: HumanoidLook }> = {
+  potions: { canopy: 0xb02a4a, keeper: { skin: 0xe8c39a, shirt: 0x6a2a8a, pants: 0x3a2a4a, boots: 0x2a1e16, eyes: 0x222222, belt: 0xd9b24a } },
+  armory: { canopy: 0x6a7480, keeper: { skin: 0xc68e64, shirt: 0x4a4440, pants: 0x2e2a26, boots: 0x1e1814, eyes: 0x222222, belt: 0x5a3c22, armor: 0x9aa3ab } },
+  weapons: { canopy: 0xc0702a, keeper: { skin: 0x8d5a3b, shirt: 0x5a3a2a, pants: 0x3a2e26, boots: 0x221c18, eyes: 0x222222, belt: 0x2a2018 } },
+  barracks: { canopy: 0x2a4f9a, keeper: { skin: 0xf1c9a5, shirt: 0xa3262a, pants: 0x3a3f4a, boots: 0x3b2a1e, eyes: 0x222222, belt: 0x5a3c22, armor: 0xb8c0c8, plume: 0xd23a2a } },
+};
+
+/** Fort Victory: stone walls on the hilltop, a gate toward the camp, and four shop stalls. */
+function addFort(scene: THREE.Scene, colliders: Colliders) {
+  const { x: fx, z: fz, r, gateAngle } = FORT;
+  const stone = lambert(0x9a9488);
+  const darkStone = lambert(0x7a746a);
+  const gateHalf = 0.22;
+  const inGate = (a: number) => Math.abs(Math.atan2(Math.sin(a - gateAngle), Math.cos(a - gateAngle))) < gateHalf;
+
+  // Walls with square towers, broken by the gate.
+  const segments = 28;
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    const a2 = ((i + 1) / segments) * Math.PI * 2;
+    const mid = (a + a2) / 2;
+    if (!inGate(mid)) {
+      const len = 2 * r * Math.sin(Math.PI / segments) + 0.3;
+      place(scene, new THREE.BoxGeometry(len, 3.6, 0.9), stone, fx + Math.sin(mid) * r, fz + Math.cos(mid) * r, 1.8, mid);
+      // Battlements along the top.
+      place(scene, new THREE.BoxGeometry(len * 0.45, 0.6, 1), stone, fx + Math.sin(mid) * r, fz + Math.cos(mid) * r, 3.9, mid);
+    }
+    if (i % 7 === 3) place(scene, new THREE.BoxGeometry(2.6, 6, 2.6), darkStone, fx + Math.sin(a) * r, fz + Math.cos(a) * r, 3, a);
+  }
+  for (let i = 0; i < 112; i++) {
+    const a = (i / 112) * Math.PI * 2;
+    if (!inGate(a)) colliders.circles.push({ x: fx + Math.sin(a) * r, z: fz + Math.cos(a) * r, r: 0.6 });
+  }
+  // Gate towers with gold-topped flags.
+  for (const side of [-1, 1]) {
+    const a = gateAngle + side * (gateHalf + 0.06);
+    const gx = fx + Math.sin(a) * r;
+    const gz = fz + Math.cos(a) * r;
+    place(scene, new THREE.BoxGeometry(2.4, 7, 2.4), darkStone, gx, gz, 3.5, a);
+    place(scene, new THREE.ConeGeometry(1.9, 2.2, 4).translate(0, 1.1, 0), lambert(0xa3262a), gx, gz, 7, a + Math.PI / 4);
+    place(scene, new THREE.OctahedronGeometry(0.3, 0), lambert(0xd9b24a), gx, gz, 9.5);
+    colliders.circles.push({ x: gx, z: gz, r: 1.5 });
+  }
+  // A stone arch over the gate.
+  const ax = fx + Math.sin(gateAngle) * r;
+  const az = fz + Math.cos(gateAngle) * r;
+  place(scene, new THREE.BoxGeometry(2 * r * Math.sin(gateHalf) + 1, 1, 1.2), darkStone, ax, az, 5.4, gateAngle);
+
+  // The shops: a counter under a colored canopy, with a shopkeeper behind it.
+  for (const stall of FORT.stalls) {
+    const look = STALL_LOOKS[stall.kind];
+    const g = new THREE.Group();
+    g.position.set(stall.x, heightAt(stall.x, stall.z), stall.z);
+    g.rotation.y = stall.angle; // local -Z faces the fort's middle
+    const wood = lambert(0x6a4a2e);
+    const add = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number) => {
+      const mesh = new THREE.Mesh(geo, m);
+      mesh.position.set(x, y, z);
+      mesh.castShadow = mesh.receiveShadow = true;
+      g.add(mesh);
+      return mesh;
+    };
+    add(new THREE.BoxGeometry(3, 1.1, 0.8), wood, 0, 0.55, -1.9);
+    add(new THREE.BoxGeometry(3.2, 0.12, 1), lambert(look.canopy), 0, 1.16, -1.9);
+    for (const px of [-1.5, 1.5]) for (const pz of [-2.3, 1.1]) add(new THREE.BoxGeometry(0.16, 2.8, 0.16), wood, px, 1.4, pz);
+    const canopy = add(new THREE.BoxGeometry(3.6, 0.2, 4), lambert(look.canopy), 0, 2.9, -0.6);
+    canopy.rotation.x = -0.12;
+    add(new THREE.BoxGeometry(3.4, 2.4, 0.15), wood, 0, 1.4, 1.2); // back wall
+    // Goods on the counter.
+    if (stall.kind === 'potions') {
+      [0xff3a4a, 0x3aff6a, 0x5a8aff, 0xff3a4a].forEach((c, i) =>
+        add(new THREE.CylinderGeometry(0.1, 0.13, 0.32, 6), new THREE.MeshBasicMaterial({ color: c }), -0.9 + i * 0.6, 1.38, -1.9),
+      );
+    } else if (stall.kind === 'armory') {
+      add(new THREE.BoxGeometry(0.6, 0.7, 0.35), lambert(0x9aa3ab), -0.7, 1.6, -1.9);
+      add(new THREE.BoxGeometry(0.4, 0.3, 0.4), lambert(0x9aa3ab), 0.7, 1.4, -1.9);
+    } else if (stall.kind === 'weapons') {
+      for (let i = 0; i < 3; i++) add(new THREE.BoxGeometry(0.08, 1.4, 0.05), lambert(0xd8dde3), -0.6 + i * 0.6, 1.9, 1.05).rotation.z = 0.15;
+    } else {
+      add(new THREE.BoxGeometry(0.06, 2, 0.06), wood, 1.2, 2.2, -1.9);
+      add(new THREE.BoxGeometry(0.7, 0.5, 0.04), lambert(0xa3262a), 1.55, 2.9, -1.9);
+    }
+    scene.add(g);
+    // The shopkeeper, facing the customers.
+    const keeper = createHumanoid(look.keeper);
+    keeper.root.position.set(stall.x, heightAt(stall.x, stall.z), stall.z);
+    keeper.root.rotation.y = stall.angle + Math.PI;
+    keeper.armR.rotation.x = -0.4;
+    keeper.armL.rotation.x = -0.4;
+    scene.add(keeper.root);
+    // The counter is solid.
+    const ux = Math.sin(stall.angle);
+    const uz = Math.cos(stall.angle);
+    for (const off of [-1, 0, 1]) {
+      colliders.circles.push({ x: stall.counter.x + uz * off * 1.1, z: stall.counter.z - ux * off * 1.1, r: 0.6 });
+    }
+    colliders.circles.push({ x: stall.x, z: stall.z, r: 1.6 });
   }
 }
 

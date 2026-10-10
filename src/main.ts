@@ -1,10 +1,10 @@
 import './style.css';
 import * as THREE from 'three';
 import { Input, PAD } from './input';
-import { createWorld, respawnPoint, territoryWeight } from './world';
+import { createWorld, heightAt, respawnPoint, territoryWeight } from './world';
 import { Player } from './player';
 import type { Enemy } from './enemy';
-import { Ally, ARMY_SIZE, SQUAD_SIZE } from './ally';
+import { Ally, ARMY_SIZE, SQUAD_SIZE, SQUAD_SLOTS } from './ally';
 import { ThirdPersonCamera } from './camera';
 import { Hud } from './hud';
 import { Particles } from './particles';
@@ -14,7 +14,9 @@ import { initAudio, musicOutput, setVolumes, sfx } from './audio';
 import { Music, type Mood, type Theme } from './music';
 import { MenuNavigator } from './menuNav';
 import { Campaign, type Objective } from './campaign';
-import { CAMP_BANNER, TERRITORIES } from './layout';
+import { CAMP_BANNER, FORT, TERRITORIES, type ShopKind } from './layout';
+import { ARMOR, goldFor, loadGoods, MAX_ARMY, MAX_POTIONS, OUTPOST_GOLD, POTION_PRICE, SOLDIER_PRICE, type Goods } from './shop';
+import type { ShopEntry } from './hud';
 import { WeaponDrops } from './loot';
 import { isWeaponId, STARTING_WEAPON, WEAPONS, weaponOf, type WeaponDef, type WeaponId } from './weapons';
 import { DIFFICULTIES, IS_XBOX, loadSettings, saveSettings, type Settings } from './settings';
@@ -107,8 +109,8 @@ for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(
 const enemies: Enemy[] = [];
 // Player 1's army (red) and Player 2's (blue). One player leads all of the red army;
 // with two players, each hero leads an army of three.
-const army1 = Array.from({ length: SQUAD_SIZE }, (_, i) => new Ally(scene, i, 0));
-const army2 = Array.from({ length: ARMY_SIZE }, (_, i) => new Ally(scene, i, 1));
+const army1 = Array.from({ length: SQUAD_SLOTS }, (_, i) => new Ally(scene, i, 0));
+const army2 = Array.from({ length: SQUAD_SLOTS }, (_, i) => new Ally(scene, i, 1));
 for (const a of army1) a.hero = player;
 for (const a of army2) a.hero = player2;
 const allies = [...army1, ...army2];
@@ -155,7 +157,9 @@ const ctx: GameContext = {
   onEnemyKilled: (z) => {
     if (z.xpReward === 0) return; // the Witch Queen's mirror images don't count
     kills++;
-    floatText(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP`, 'xp');
+    const gold = goldFor(z.xpReward, z.isBoss);
+    floatText(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP · +${gold} gold`, 'xp');
+    awardGold(gold);
     awardXp(z.xpReward);
   },
   summonMinions: (around, count) => campaign.summonMinions(around, count, ctx),
@@ -180,7 +184,8 @@ const campaign = new Campaign(scene, world, enemies, {
     hud.announce(t.def.name, `${status} · Reinforcements have joined you`);
   },
   awardXp: (amount, at) => {
-    floatText(at, `+${amount} XP`, 'xp');
+    floatText(at, `+${amount} XP · +${OUTPOST_GOLD} gold`, 'xp');
+    awardGold(OUTPOST_GOLD);
     awardXp(amount);
   },
   bossStarted: (name) => hud.showBoss(name),
@@ -200,6 +205,11 @@ const campaign = new Campaign(scene, world, enemies, {
 function floatText(at: THREE.Vector3, text: string, kind: Parameters<Floaters['spawn']>[2]) {
   floaters.spawn(at, text, kind);
   if (twoPlayer) floaters2.spawn(at, text, kind);
+}
+
+/** Every hero playing gets the gold (each has their own). */
+function awardGold(amount: number) {
+  for (const h of ctx.players) if (!(h === player2 && choosingP2)) h.goods.gold += amount;
 }
 
 /** Every kill and capture gives each hero the XP; each levels up on their own. */
@@ -230,6 +240,7 @@ function saveGame() {
     playTime: Math.round(playTime),
     weapons: [...owned],
     weapon: player.weapon.id,
+    goods: player.goods,
     ...campaign.saveFields(),
     savedAt: Date.now(),
   });
@@ -242,7 +253,7 @@ function saveGame() {
  */
 function saveWeapons() {
   const save = loadSave();
-  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id });
+  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id, goods: player.goods });
   saveP2();
 }
 
@@ -256,7 +267,7 @@ let choosingP2 = false;
 /** Saves Player 2's hero: level, XP and weapons. */
 function saveP2() {
   if (!twoPlayer || !p2Hero) return;
-  p2Hero = { ...p2Hero, level: player2.level, xp: player2.xp, weapons: [...owned2], weapon: player2.weapon.id };
+  p2Hero = { ...p2Hero, level: player2.level, xp: player2.xp, weapons: [...owned2], weapon: player2.weapon.id, goods: player2.goods };
   saveHero(p2Hero);
 }
 
@@ -264,6 +275,7 @@ function saveP2() {
 function becomeHero(hero: Player2Hero) {
   p2Hero = hero;
   choosingP2 = false;
+  player2.goods = goodsFrom(hero.goods, hero.weapons);
   player2.loadHero(hero.name, hero.level, hero.xp);
   owned2.clear();
   owned2.add(STARTING_WEAPON);
@@ -295,12 +307,24 @@ hud.onP2Cancel = () => leavePlayer2();
   }
 }
 
+/** This hero hasn't picked up this leader's weapon yet. */
+function needsDrop(h: Player, id: WeaponId) {
+  return !h.goods.claimed.includes(id) && !ownedBy(h).has(id);
+}
+
+/** A hero's goods from a save. Older saves: any leader weapons they have count as picked up. */
+function goodsFrom(raw: Partial<Goods> | undefined, weapons: readonly string[]): Goods {
+  const goods = loadGoods(raw);
+  if (!raw) goods.claimed = weapons.filter((id): id is WeaponId => isWeaponId(id) && WEAPONS.some((w) => w.id === id && w.from !== null));
+  return goods;
+}
+
 /** Puts each beaten leader's weapon back in its lair until every hero playing has their own. */
 function placeMissingDrops(leaders: Iterable<string>) {
   for (const id of leaders) {
     const w = weaponOf(id);
     const land = TERRITORIES.find((t) => t.leader.id === id);
-    if (w && land && ctx.players.some((h) => !ownedBy(h).has(w.id)) && !drops.isOut(w.id)) drops.place(w.id, land.arena.x, land.arena.z);
+    if (w && land && ctx.players.some((h) => needsDrop(h, w.id)) && !drops.isOut(w.id)) drops.place(w.id, land.arena.x, land.arena.z);
   }
 }
 
@@ -313,6 +337,8 @@ function loadWeapons(save: SaveData | null) {
   const claimed = save?.weapons ?? leaders.map((id) => weaponOf(id)?.id);
   for (const id of claimed) if (isWeaponId(id)) owned.add(id);
   player.setWeapon(isWeaponId(save?.weapon) && owned.has(save.weapon) ? save.weapon : STARTING_WEAPON);
+  player.goods = goodsFrom(save?.goods, [...owned]);
+  player.refreshStats();
   drops.clear();
   placeMissingDrops(leaders);
 }
@@ -341,8 +367,9 @@ function equip(w: WeaponDef, announce: boolean, hero: Player = player) {
 /** Walked into a fallen leader's weapon: it's this hero's, and in their hand. It stays until every hero has one. */
 function claimWeapon(w: WeaponDef, hero: Player) {
   ownedBy(hero).add(w.id);
+  if (!hero.goods.claimed.includes(w.id)) hero.goods.claimed.push(w.id);
   hero.setWeapon(w.id);
-  if (ctx.players.every((h) => ownedBy(h).has(w.id))) drops.remove(w.id);
+  if (ctx.players.every((h) => !needsDrop(h, w.id))) drops.remove(w.id);
   else hud.announce(`${w.name} is still here`, `The other hero can grab one too`);
   saveWeapons();
   sfx.levelUp();
@@ -370,8 +397,14 @@ function closeInventory() {
 
 /** One player leads the whole red army; two players lead three soldiers each. */
 function inService(a: Ally) {
-  if (a.army === 1) return twoPlayer;
-  return !twoPlayer || army1.indexOf(a) < ARMY_SIZE;
+  if (a.army === 1 && !twoPlayer) return false;
+  const hero = a.army === 1 ? player2 : player;
+  return (a.army === 1 ? army2 : army1).indexOf(a) < armySize(hero);
+}
+
+/** How many soldiers a hero leads: 4 alone or 3 each in two-player, plus any hired (at most 5). */
+function armySize(hero: Player) {
+  return Math.min(MAX_ARMY, (twoPlayer ? ARMY_SIZE : SQUAD_SIZE) + hero.goods.soldiers);
 }
 
 /** Fallen soldiers are replaced by fresh ones in formation behind their hero. */
@@ -392,6 +425,11 @@ function reinforceSquad(everyone = false) {
 /** Starts (or restarts after death) play from a save: hero, territory and position. */
 function enterWorld(save: SaveData) {
   hud.fadeIn();
+  returnSpot = null;
+  hud.setGoBackAvailable(false);
+  hud.showShop(false);
+  shopKind = null;
+  atStall.clear();
   player.loadHero(save.name, save.level, save.xp);
   loadWeapons(save);
   hud.showInventory(false);
@@ -405,6 +443,7 @@ function enterWorld(save: SaveData) {
     const saved = p2Hero && loadHeroes().find((h) => h.id === p2Hero!.id);
     if (saved) {
       p2Hero = saved;
+      player2.goods = goodsFrom(saved.goods, saved.weapons);
       player2.loadHero(saved.name, saved.level, saved.xp);
     }
     if (!owned2.has(player2.weapon.id)) player2.setWeapon(STARTING_WEAPON);
@@ -606,6 +645,224 @@ hud.onTogglePlayer2 = () => {
   lockPointer();
 };
 
+// ---------- Fort Victory: teleporting, shops and potions ----------
+
+/** Where "Go back" returns the team after teleporting to the fort. */
+let returnSpot: { x: number; z: number; yaw: number } | null = null;
+
+/** Moves both heroes (side by side) and their living soldiers to (x, z). */
+function teleportTeam(x: number, z: number, yaw: number) {
+  ctx.players.forEach((h, i) => {
+    if (!h.alive) return;
+    h.teleport(x - Math.cos(yaw) * 1.6 * i, z + Math.sin(yaw) * 1.6 * i, yaw);
+    (h === player ? camCtrl : camCtrl2).yaw = yaw;
+  });
+  const slot = new THREE.Vector3();
+  for (const a of allies) {
+    if (!a.alive) continue;
+    a.slotPosition(ctx, slot);
+    a.reinforce(slot.x, slot.z);
+  }
+  projectiles.clear();
+  particles.burst(new THREE.Vector3(x, heightAt(x, z) + 1, z), 0xffd36b, 30, 6);
+  sfx.checkpoint();
+}
+
+hud.onGoToFort = () => {
+  if (campaign.activeFight) {
+    hud.announce('Not now!', "You can't leave in the middle of a boss fight");
+    return;
+  }
+  const from = pausedBy.alive ? pausedBy : player;
+  returnSpot = { x: from.pos.x, z: from.pos.z, yaw: from.yaw };
+  const spot = respawnPoint(FORT.banner);
+  teleportTeam(spot.x, spot.z, FORT.gateAngle + Math.PI);
+  hud.setGoBackAvailable(true);
+  hud.announce('Fort Victory', 'Pause · Go back returns you to where you were');
+  lockPointer();
+};
+hud.onGoBack = () => {
+  if (!returnSpot) return;
+  if (campaign.activeFight) {
+    hud.announce('Not now!', "You can't leave in the middle of a boss fight");
+    return;
+  }
+  teleportTeam(returnSpot.x, returnSpot.z, returnSpot.yaw);
+  returnSpot = null;
+  hud.setGoBackAvailable(false);
+  lockPointer();
+};
+
+/** Who is shopping, and where. */
+let shopFor: Player = player;
+let shopKind: ShopKind | null = null;
+/** The stall each hero is standing at (a shop opens when they step up to it). */
+const atStall = new Map<Player, ShopKind | null>();
+
+/** The stall whose counter this hero is standing at, if any. */
+function stallAt(h: Player): ShopKind | null {
+  for (const st of FORT.stalls) {
+    const fx = FORT.x + Math.sin(st.angle) * 7.2;
+    const fz = FORT.z + Math.cos(st.angle) * 7.2;
+    if (Math.hypot(h.pos.x - fx, h.pos.z - fz) < 1.7) return st.kind;
+  }
+  return null;
+}
+
+function updateShopTriggers() {
+  for (const h of ctx.players) {
+    if (!h.alive || (h === player2 && choosingP2)) continue;
+    const kind = stallAt(h);
+    const was = atStall.get(h) ?? null;
+    atStall.set(h, kind);
+    if (kind && kind !== was && !hud.shopOpen && !hud.inventoryOpen && !hud.p2PickerOpen && !hud.pauseOpen) openShop(h, kind);
+  }
+}
+
+function openShop(h: Player, kind: ShopKind) {
+  shopFor = h;
+  shopKind = kind;
+  hud.showMap(false);
+  renderShop();
+  hud.showShop(true, twoPlayer ? (h === player ? 'left' : 'right') : null);
+  if (document.pointerLockElement) document.exitPointerLock();
+  sfx.click();
+}
+
+function closeShop() {
+  hud.showShop(false);
+  shopKind = null;
+  saveWeapons();
+  lockPointer();
+}
+hud.onShopClose = closeShop;
+
+/** After buying or selling: a sound, the shop redrawn, and the hero saved. */
+function bought(sound = true) {
+  if (sound) sfx.checkpoint();
+  renderShop();
+  saveWeapons();
+}
+
+function renderShop() {
+  if (!shopKind) return;
+  const h = shopFor;
+  const g = h.goods;
+  const mine = ownedBy(h);
+  const stall = FORT.stalls.find((st) => st.kind === shopKind)!;
+  const sub = `${twoPlayer ? `${h.name} has` : 'You have'} ${g.gold} gold`;
+  const entries: ShopEntry[] = [];
+  if (shopKind === 'potions') {
+    entries.push({
+      label: 'Healing Potion',
+      sub: `${POTION_PRICE} gold · heals half your health · you carry ${g.potions} of ${MAX_POTIONS}`,
+      disabled: g.gold < POTION_PRICE || g.potions >= MAX_POTIONS,
+      onClick: () => {
+        g.gold -= POTION_PRICE;
+        g.potions++;
+        bought();
+      },
+    });
+  } else if (shopKind === 'armory') {
+    ARMOR.forEach((a, tier) => {
+      if (tier === 0) return;
+      const wearing = tier === g.armor;
+      entries.push({
+        label: a.name,
+        sub: wearing ? 'You are wearing it' : tier < g.armor ? 'You have better armor' : `${a.price} gold · +${a.health} health`,
+        disabled: tier <= g.armor || g.gold < a.price,
+        onClick: () => {
+          g.gold -= a.price;
+          g.armor = tier;
+          h.refreshStats();
+          bought();
+        },
+      });
+    });
+  } else if (shopKind === 'barracks') {
+    const size = armySize(h);
+    entries.push({
+      label: 'Hire a soldier',
+      sub: size >= MAX_ARMY ? `Your army is full (${size} of ${MAX_ARMY})` : `${SOLDIER_PRICE} gold · army ${size} of ${MAX_ARMY}`,
+      disabled: size >= MAX_ARMY || g.gold < SOLDIER_PRICE,
+      onClick: () => {
+        g.gold -= SOLDIER_PRICE;
+        g.soldiers++;
+        reinforceSquad(); // the new soldier joins right away
+        bought();
+      },
+    });
+  } else {
+    // The weaponsmith: buy (or buy back), trade the weapon in hand, or sell.
+    const equipped = h.weapon;
+    const forSale = WEAPONS.filter((w) => !mine.has(w.id) && (w.shop || g.pawned.includes(w.id)));
+    entries.push({ heading: 'Buy' });
+    if (forSale.length === 0) entries.push({ label: 'Nothing left to buy', sub: 'You have every weapon here', disabled: true, onClick: () => {} });
+    for (const w of forSale) {
+      entries.push({
+        label: g.pawned.includes(w.id) && !w.shop ? `Buy back the ${w.name}` : w.name,
+        sub: `${w.value} gold · ${w.description}`,
+        disabled: g.gold < w.value,
+        onClick: () => {
+          g.gold -= w.value;
+          g.pawned = g.pawned.filter((id) => id !== w.id);
+          mine.add(w.id);
+          h.setWeapon(w.id);
+          bought();
+        },
+      });
+      if (equipped.value >= w.value) {
+        entries.push({
+          label: `Trade your ${equipped.name} for the ${w.name}`,
+          sub: 'A straight swap, no gold needed',
+          onClick: () => {
+            mine.delete(equipped.id);
+            if (!g.pawned.includes(equipped.id)) g.pawned.push(equipped.id);
+            g.pawned = g.pawned.filter((id) => id !== w.id);
+            mine.add(w.id);
+            h.setWeapon(w.id);
+            bought();
+          },
+        });
+      }
+    }
+    entries.push({ heading: 'Sell' });
+    const sellable = WEAPONS.filter((w) => mine.has(w.id) && w.value > 0);
+    if (sellable.length === 0) entries.push({ label: 'Nothing to sell', sub: "Your Soldier's Sword stays with you", disabled: true, onClick: () => {} });
+    for (const w of sellable) {
+      entries.push({
+        label: `Sell the ${w.name}`,
+        sub: `${Math.floor(w.value / 2)} gold${w === equipped ? ' · the weapon in your hand' : ''}`,
+        onClick: () => {
+          g.gold += Math.floor(w.value / 2);
+          mine.delete(w.id);
+          if (!g.pawned.includes(w.id)) g.pawned.push(w.id);
+          if (h.weapon === w) h.setWeapon(STARTING_WEAPON);
+          bought(false);
+          sfx.levelUp();
+        },
+      });
+    }
+  }
+  hud.renderShop(stall.name, sub, entries, inputOf(h).mode === 'gamepad');
+}
+
+/** H or d-pad up: drink a healing potion. */
+function updatePotions(browsing: Player | null) {
+  for (const h of ctx.players) {
+    if (h === browsing || !inputOf(h).potionPressed || (h === player2 && choosingP2)) continue;
+    const at = new THREE.Vector3(h.pos.x, h.pos.y + 2.1, h.pos.z);
+    const before = h.hp;
+    if (h.drinkPotion()) {
+      floatText(at, `+${Math.round(h.hp - before)}`, 'heal');
+      particles.burst(new THREE.Vector3(h.pos.x, h.pos.y + 1.2, h.pos.z), 0xff5a6a, 16, 3);
+      sfx.checkpoint();
+    } else if (h.goods.potions === 0) {
+      floatText(at, 'No potions', 'damage');
+    }
+  }
+}
+
 // ---------- Menu flow: title → (name → intro | continue) → play ----------
 
 /** Grabs the pointer. If the browser refuses, the pause screen offers a Resume button. */
@@ -621,7 +878,7 @@ function lockPointer() {
   input.requestLock();
   setTimeout(() => {
     const usingPad = input.mode === 'gamepad';
-    if (phase === 'playing' && !input.locked && !usingPad && !twoPlayer && player.alive && !hud.optionsOpen && !hud.inventoryOpen) hud.showPause(true);
+    if (phase === 'playing' && !input.locked && !usingPad && !twoPlayer && player.alive && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen) hud.showPause(true);
   }, 1200);
 }
 
@@ -653,6 +910,9 @@ hud.onInventory = () => openInventory(pausedBy);
 hud.onInventoryClose = closeInventory;
 hud.onEquip = (id) => equip(WEAPONS.find((w) => w.id === id)!, false, inventoryFor);
 hud.onRespawn = () => {
+  // Nothing is lost: save everything as it is, then come back at the fort.
+  campaign.current = campaign.fortCheckpoint;
+  saveGame();
   enterWorld(loadSave() ?? newSave(player.name));
   lockPointer();
 };
@@ -667,12 +927,12 @@ input.onLockChange = (locked) => {
     pausedBy = player;
     hud.setPauseInventoryLabel(twoPlayer ? `${player.name}'s inventory` : 'Inventory');
   }
-  if (twoPlayer && !locked && phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !endingShown) {
+  if (twoPlayer && !locked && phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !endingShown) {
     // Player 1 let go of the mouse: their own pause menu, on their half.
     hud.showPause(player.alive, 'left');
     return;
   }
-  if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !endingShown) hud.showPause(!locked && ctx.players.some((h) => h.alive));
+  if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !endingShown) hud.showPause(!locked && ctx.players.some((h) => h.alive));
 };
 
 /** The war is won: release the mouse and roll the ending. */
@@ -808,16 +1068,18 @@ function tick(realDt: number) {
   if (resumed) hud.showPause(false);
   // Two-player menus (pause, inventory, who is Player 2?) cover one hero's half only.
   // Only that hero's controller works them, and the game goes on for the other.
-  const sideInventory = twoPlayer && (hud.inventoryOpen || hud.p2PickerOpen || hud.pauseOpen);
+  const sideInventory = twoPlayer && (hud.inventoryOpen || hud.p2PickerOpen || hud.pauseOpen || hud.shopOpen);
   const browsing = !twoPlayer
     ? null
     : hud.p2PickerOpen
       ? player2
-      : hud.inventoryOpen
-        ? inventoryFor
-        : hud.pauseOpen
-          ? pausedBy
-          : null;
+      : hud.shopOpen
+        ? shopFor
+        : hud.inventoryOpen
+          ? inventoryFor
+          : hud.pauseOpen
+            ? pausedBy
+            : null;
   menuNav.update(browsing ? [inputOf(browsing)] : inputs);
 
   if (phase === 'menu') {
@@ -833,6 +1095,10 @@ function tick(realDt: number) {
       hud.showPause(true, twoPlayer ? (pausedBy === player ? 'left' : 'right') : null);
     }
     let closedNow = false;
+    if (hud.shopOpen && shopFor === player && input.escapePressed) {
+      closeShop();
+      closedNow = true;
+    }
     if (hud.inventoryOpen) {
       // One player: the game waits while the hero picks a weapon. Only the chooser can close it.
       const chooser = inputOf(inventoryFor);
@@ -841,15 +1107,16 @@ function tick(realDt: number) {
         closedNow = true;
       }
     }
-    if ((!hud.inventoryOpen || sideInventory) && !closedNow && (input.locked || padPlay || testMode) && !endingShown) {
+    if (((!hud.inventoryOpen && !hud.shopOpen) || sideInventory) && !closedNow && (input.locked || padPlay || testMode) && !endingShown) {
       playTime += realDt;
       const chooserInput = browsing ? inputOf(browsing) : null;
       if (inputs.some((i) => i !== chooserInput && i.mapPressed)) hud.showMap(!hud.mapOpen);
-      if (!hud.inventoryOpen && !hud.p2PickerOpen) {
+      if (!hud.inventoryOpen && !hud.p2PickerOpen && !hud.shopOpen) {
         if (input.inventoryPressed && player.alive) openInventory(player);
         else if (twoPlayer && input2.inventoryPressed && player2.alive) openInventory(player2);
       }
       updateWeaponSwap(browsing);
+      updatePotions(browsing);
       // The hero choosing a weapon stands still; the other plays on.
       const in1 = browsing === player ? noInput : input;
       const in2 = browsing === player2 ? noInput : input2;
@@ -864,12 +1131,13 @@ function tick(realDt: number) {
       player.update(dt, ctx, in1, camCtrl.yaw);
       if (twoPlayer) player2.update(dt, ctx, in2, camCtrl2.yaw);
       updateRevives();
+      updateShopTriggers();
       for (const a of allies) a.update(dt, ctx);
       updateEnemies(dt);
       separateBodies();
       campaign.update(dt, ctx);
       projectiles.update(dt, ctx);
-      const claimed = drops.update(dt, ctx.players.filter((h) => h.alive), particles, (h, w) => !ownedBy(h).has(w.id));
+      const claimed = drops.update(dt, ctx.players.filter((h) => h.alive), particles, (h, w) => needsDrop(h, w.id));
       if (claimed) claimWeapon(claimed.weapon, claimed.by);
       particles.update(dt);
       floaters.update(dt, camera);

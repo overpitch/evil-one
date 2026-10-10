@@ -5,8 +5,8 @@
 export type ZombieKind = 'shambler' | 'runner' | 'brute';
 export type WitchKind = 'hexer' | 'broomWitch' | 'witchDecoy';
 export type VampireKind = 'thrall' | 'knight';
-/** Zomawi's own minions. */
-export type GremlinKind = 'gremlin';
+/** Zomawi's own minions, and the masked killers guarding the courtyard. */
+export type GremlinKind = 'gremlin' | 'ghostface';
 export type EnemyKind = ZombieKind | WitchKind | VampireKind | GremlinKind;
 
 export type TerritoryId = 'zombie' | 'witch' | 'vampire' | 'fortress';
@@ -19,6 +19,45 @@ export interface Spot {
 
 export const HUMAN_CAMP = { x: 0, z: 0 };
 export const CAMP_BANNER = { id: 'camp', name: 'Human Camp', x: 3, z: -9 };
+
+export type ShopKind = 'potions' | 'armory' | 'weapons' | 'barracks';
+
+/**
+ * Fort Victory: the heroes' base, on a big hill in the empty northeast.
+ * Fallen heroes and their armies come back here. Four shop stalls stand
+ * inside, around the banner; walking up to a counter opens its shop.
+ */
+export const FORT = (() => {
+  const x = 84;
+  const z = 84;
+  const r = 17;
+  // The gate faces the human camp.
+  const gateAngle = Math.atan2(HUMAN_CAMP.x - x, HUMAN_CAMP.z - z);
+  const at = (angle: number, d: number) => ({ x: x + Math.sin(angle) * d, z: z + Math.cos(angle) * d });
+  const stall = (kind: ShopKind, name: string, offset: number) => {
+    const a = gateAngle + offset;
+    return { kind, name, angle: a, ...at(a, 10.5), counter: at(a, 8.6) };
+  };
+  return {
+    id: 'fort',
+    name: 'Fort Victory',
+    x,
+    z,
+    r,
+    gateAngle,
+    /** The hill's height at the top, and how far its slopes reach. */
+    hillHeight: 13,
+    hillTop: r + 5,
+    hillFoot: r + 34,
+    banner: { id: 'fort', name: 'Fort Victory', ...at(gateAngle, 4) },
+    stalls: [
+      stall('potions', 'Potion Shop', Math.PI * 0.45),
+      stall('armory', 'Armory', Math.PI * 0.8),
+      stall('weapons', 'Weaponsmith', -Math.PI * 0.8),
+      stall('barracks', 'Barracks', -Math.PI * 0.45),
+    ],
+  };
+})();
 
 export interface OutpostDef {
   id: string;
@@ -298,20 +337,26 @@ export const TERRITORIES: TerritoryDef[] = [
         z: -84,
         flatRadius: 13,
         decor: 'spikes',
-        // Zomawi's gremlins swarm the courtyard (and its counterattack).
+        // Zomawi's gremlins swarm the courtyard, with five ghostfaces among them
+        // (the counterattack brings most of them back).
         spawns: [
-          ['gremlin', 0, 0],
+          ['ghostface', 0, 0],
           ['gremlin', -2, 1.5],
           ['gremlin', 2, 1.5],
-          ['gremlin', -4, -1],
+          ['ghostface', -4, -1],
           ['gremlin', 4, -1],
           ['gremlin', -3, -4],
+          ['ghostface', 4, 2],
           ['gremlin', 3, -4],
           ['gremlin', 0, -3],
-          ['gremlin', -5, 3],
+          ['ghostface', -5, 3],
           ['gremlin', 5, 3],
           ['gremlin', -1.5, 5],
+          ['ghostface', 0, 6],
           ['gremlin', 1.5, 5],
+          ['gremlin', -6, -2],
+          ['gremlin', 6, -2],
+          ['gremlin', 0, -6],
         ],
       },
     ],

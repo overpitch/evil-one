@@ -14,9 +14,12 @@ type State = 'follow' | 'engage' | 'windup' | 'strike' | 'recover' | 'stagger' |
  * flank the hero rather than trail behind, because the camera sits behind
  * the hero's right shoulder.
  */
-const SLOTS: [number, number][] = [[-2.2, 0.4], [2.6, 1], [-4, -1], [4.4, 0.2]];
-export const SQUAD_SIZE = SLOTS.length;
-/** With two players, each hero leads an army of this many. */
+const SLOTS: [number, number][] = [[-2.2, 0.4], [2.6, 1], [-4, -1], [4.4, 0.2], [0.4, -2.8]];
+/** Room for the biggest army (with soldiers hired at the barracks). */
+export const SQUAD_SLOTS = SLOTS.length;
+/** A lone hero's army before hiring anyone. */
+export const SQUAD_SIZE = 4;
+/** With two players, each hero leads an army of this many (before hiring). */
 export const ARMY_SIZE = 3;
 /** Shirt colors: Player 1's army in red, Player 2's in blue. */
 const ARMY_SHIRTS = [0x8a2a2a, 0x2a4a8a];

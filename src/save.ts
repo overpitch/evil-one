@@ -17,6 +17,8 @@ export interface SaveData {
   weapon?: string;
   /** Player 2's own weapons, kept between visits. */
   player2?: { weapons: string[]; weapon: string };
+  /** Gold, potions, armor and hired soldiers. */
+  goods?: Partial<import('./shop').Goods>;
   /** Seconds of play so far. */
   playTime?: number;
   savedAt: number;

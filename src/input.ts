@@ -2,7 +2,7 @@ import { IS_XBOX } from './settings';
 
 /** Keys the browser should never act on while playing (e.g. Space scrolling the page). */
 const GAME_KEYS = new Set([
-  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyK', 'KeyJ', 'KeyE', 'KeyM', 'KeyI',
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyK', 'KeyJ', 'KeyE', 'KeyM', 'KeyI', 'KeyH',
   'Space', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
 ]);
 
@@ -296,6 +296,11 @@ export class Input {
 
   get mapPressed() {
     return this.pressed.has('KeyM') || this.padWasPressed(PAD.VIEW);
+  }
+
+  /** H, or the d-pad up: drink a healing potion. */
+  get potionPressed() {
+    return this.pressed.has('KeyH') || this.padWasPressed(PAD.UP);
   }
 
   /** I, or the controller's Y button: open or close the inventory. */

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { LeaderId } from './layout';
 
-export type WeaponId = 'sword' | 'gravebreaker' | 'hexfire' | 'bloodfang' | 'doomblade';
+export type WeaponId = 'sword' | 'gravebreaker' | 'hexfire' | 'bloodfang' | 'doomblade' | 'spear' | 'daggers' | 'axe' | 'hammer';
 
 /**
  * A weapon the hero can carry. The starting sword is always owned; each
@@ -11,8 +11,12 @@ export type WeaponId = 'sword' | 'gravebreaker' | 'hexfire' | 'bloodfang' | 'doo
 export interface WeaponDef {
   id: WeaponId;
   name: string;
-  /** The leader who drops it (null: the hero's own sword). */
+  /** The leader who drops it (null: the hero's own sword, or a shop weapon). */
   from: LeaderId | null;
+  /** Sold at Fort Victory's weaponsmith. */
+  shop?: boolean;
+  /** Gold it costs at the weaponsmith; it sells for half. 0 = can't be sold. */
+  value: number;
   /** One line about what it does, for the inventory. */
   description: string;
   /** 1–5 pips shown in the inventory. */
@@ -35,6 +39,8 @@ export interface WeaponDef {
     slam?: { radius: number; share: number };
     /** Heals the hero for this share of the damage each hit deals. */
     lifesteal?: number;
+    /** Every hit staggers (and knocks back) anything short of a leader. */
+    stagger?: boolean;
   };
   /** Glow color for its pickup beam and the inventory card. */
   color: number;
@@ -42,6 +48,8 @@ export interface WeaponDef {
   icon: string;
   /** The 3D model, held at the grip with the business end along +Z. */
   build(): THREE.Group;
+  /** A second one for the left hand (twin daggers). */
+  offhand?: boolean;
 }
 
 const matCache = new Map<number, THREE.Material>();
@@ -68,6 +76,7 @@ const GOLD = 0xc9a24a;
 export const WEAPONS: WeaponDef[] = [
   {
     id: 'sword',
+    value: 0,
     name: "Soldier's Sword",
     from: null,
     description: 'Trusty and balanced. The blade every human soldier carries.',
@@ -88,6 +97,7 @@ export const WEAPONS: WeaponDef[] = [
   },
   {
     id: 'gravebreaker',
+    value: 150,
     name: 'Gravebreaker',
     from: 'zombie-king',
     description: 'The Zombie King\'s bone maul. Slow, crushing blows, and every third swing slams the ground.',
@@ -114,6 +124,7 @@ export const WEAPONS: WeaponDef[] = [
   },
   {
     id: 'hexfire',
+    value: 200,
     name: 'Hexfire Staff',
     from: 'witch-queen',
     description: 'The Witch Queen\'s staff. Every swing throws a fire bolt, and the third throws three.',
@@ -141,6 +152,7 @@ export const WEAPONS: WeaponDef[] = [
   },
   {
     id: 'bloodfang',
+    value: 250,
     name: 'Bloodfang',
     from: 'vampire-lord',
     description: 'The Vampire Lord\'s saber. Lightning fast, and every hit heals you a little.',
@@ -168,6 +180,7 @@ export const WEAPONS: WeaponDef[] = [
   },
   {
     id: 'doomblade',
+    value: 400,
     name: 'Doomblade',
     from: 'zomawi',
     description: 'Zomawi\'s greatsword. Huge reach and power; every hit heals you and every third swing slams the ground.',
@@ -189,6 +202,90 @@ export const WEAPONS: WeaponDef[] = [
       box(g, 0.02, 0.035, 1.3, mat(0xb04aff, true), 0.07, 0, 0.9);
       box(g, 0.02, 0.035, 1.3, mat(0x7aff5a, true), -0.07, 0, 0.9);
       box(g, 0.09, 0.03, 0.14, steel, 0, 0, 1.66).rotation.y = Math.PI / 4;
+      return g;
+    },
+  },
+  {
+    id: 'spear',
+    name: 'Spear',
+    from: null,
+    shop: true,
+    value: 60,
+    description: 'Very long reach and quick, narrow thrusts. Hit enemies before they reach you.',
+    pips: { damage: 2, speed: 4, reach: 5 },
+    swing: { damage: 0.9, dur: 0.85, reach: 1.3, arc: -0.45, knockback: 0.9, stamina: 0.9 },
+    special: {},
+    color: 0x9ad0ff,
+    icon: `<g transform="rotate(45 32 32)"><rect x="30.5" y="12" width="3" height="50" fill="#6a4426"/><path d="M32 0 L37 12 L27 12Z" fill="#d8dde3"/><rect x="28" y="12" width="8" height="3" fill="#c9a24a"/></g>`,
+    build() {
+      const g = new THREE.Group();
+      box(g, 0.05, 0.05, 2.0, mat(0x6a4426), 0, 0, 0.55);
+      box(g, 0.09, 0.09, 0.08, mat(GOLD), 0, 0, 1.55);
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.4, 4).rotateX(Math.PI / 2), mat(0xd8dde3));
+      tip.position.z = 1.78;
+      g.add(tip);
+      return g;
+    },
+  },
+  {
+    id: 'daggers',
+    name: 'Twin Daggers',
+    from: null,
+    shop: true,
+    value: 80,
+    offhand: true,
+    description: 'A dagger in each hand. Super fast slashes: weak hits, but a lot of them.',
+    pips: { damage: 1, speed: 5, reach: 1 },
+    swing: { damage: 0.55, dur: 0.55, reach: -0.5, arc: 0.1, knockback: 0.5, stamina: 0.6 },
+    special: {},
+    color: 0xc8f0a0,
+    icon: `<g transform="rotate(30 32 32)"><rect x="18" y="8" width="4" height="26" fill="#d8dde3"/><rect x="14" y="34" width="12" height="3" fill="#c9a24a"/><rect x="18.5" y="37" width="3" height="8" fill="#3a2a1a"/></g><g transform="rotate(-30 32 32)"><rect x="42" y="8" width="4" height="26" fill="#d8dde3"/><rect x="38" y="34" width="12" height="3" fill="#c9a24a"/><rect x="42.5" y="37" width="3" height="8" fill="#3a2a1a"/></g>`,
+    build() {
+      const g = new THREE.Group();
+      box(g, 0.04, 0.04, 0.16, mat(0x3a2a1a), 0, 0, 0);
+      box(g, 0.18, 0.04, 0.04, mat(GOLD), 0, 0, 0.09);
+      box(g, 0.05, 0.015, 0.42, mat(0xd8dde3), 0, 0, 0.32);
+      return g;
+    },
+  },
+  {
+    id: 'axe',
+    name: 'Battle Axe',
+    from: null,
+    shop: true,
+    value: 120,
+    description: 'A big heavy axe with a wide swing that hits everyone around you.',
+    pips: { damage: 4, speed: 2, reach: 3 },
+    swing: { damage: 1.4, dur: 1.2, reach: 0.3, arc: 0.6, knockback: 1.4, stamina: 1.3 },
+    special: {},
+    color: 0xff9a4a,
+    icon: `<g transform="rotate(35 32 32)"><rect x="30" y="8" width="4" height="54" fill="#6a4426"/><path d="M34 8 Q50 4 52 18 Q50 30 34 26Z" fill="#c8ccd2"/><path d="M30 8 Q18 10 16 17 Q18 24 30 24Z" fill="#a8acb2"/></g>`,
+    build() {
+      const g = new THREE.Group();
+      box(g, 0.06, 0.06, 1.25, mat(0x6a4426), 0, 0, 0.4);
+      box(g, 0.05, 0.42, 0.34, mat(0xc8ccd2), 0, 0.22, 0.88);
+      box(g, 0.05, 0.22, 0.2, mat(0xa8acb2), 0, -0.14, 0.92);
+      return g;
+    },
+  },
+  {
+    id: 'hammer',
+    name: 'War Hammer',
+    from: null,
+    shop: true,
+    value: 150,
+    description: 'Slow, but every hit knocks enemies off their feet and sends them flying.',
+    pips: { damage: 4, speed: 1, reach: 3 },
+    swing: { damage: 1.5, dur: 1.35, reach: 0.2, arc: 0.1, knockback: 2.6, stamina: 1.4 },
+    special: { stagger: true },
+    color: 0xffd36b,
+    icon: `<g transform="rotate(35 32 32)"><rect x="30" y="16" width="4" height="46" fill="#4a3020"/><rect x="18" y="4" width="28" height="14" rx="2" fill="#8a8e96"/><rect x="18" y="4" width="4" height="14" fill="#c9a24a"/><rect x="42" y="4" width="4" height="14" fill="#c9a24a"/></g>`,
+    build() {
+      const g = new THREE.Group();
+      box(g, 0.06, 0.06, 1.2, mat(0x4a3020), 0, 0, 0.4);
+      box(g, 0.5, 0.26, 0.26, mat(0x8a8e96), 0, 0, 1.0);
+      box(g, 0.08, 0.28, 0.28, mat(GOLD), 0.23, 0, 1.0);
+      box(g, 0.08, 0.28, 0.28, mat(GOLD), -0.23, 0, 1.0);
       return g;
     },
   },

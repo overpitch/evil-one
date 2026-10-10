@@ -1,4 +1,5 @@
 import { MAX_LEVEL } from './progression';
+import type { Goods } from './shop';
 
 /**
  * Saved Player 2 heroes. Each has their own name, level, XP and weapons,
@@ -12,6 +13,8 @@ export interface Player2Hero {
   xp: number;
   weapons: string[];
   weapon: string;
+  /** Gold, potions, armor and hired soldiers. */
+  goods?: Partial<Goods>;
 }
 
 const MAX_HEROES = 8;

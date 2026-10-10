@@ -25,6 +25,7 @@
           <div class="bar xp"><div class="fill" data-s="xp-fill"></div></div>
           <div class="xp-text" data-s="xp-text"></div>
           <div class="weapon-tag"><span class="weapon-tag-icon" data-s="weapon-icon"></span><span data-s="weapon-name"></span></div>
+          <div class="goods-row"><span class="coin">●</span> <span data-s="gold">0</span> gold <span class="potion-icon">▲</span> <span data-s="potions">0</span> <span data-s="potion-hint"></span></div>
           <div class="status-effect hidden" data-s="slowed">Hexed · slowed</div>
         </div>
         <div class="crosshair"></div>
@@ -160,6 +161,8 @@
           <button id="resume-btn">Resume</button>
           <button id="pause-inventory-btn" class="secondary">Inventory</button>
           <button id="pause-p2-btn" class="secondary">Add Player 2</button>
+          <button id="pause-fort-btn" class="secondary">Go to Fort Victory</button>
+          <button id="pause-back-btn" class="secondary hidden">Go back</button>
           <button id="pause-options-btn" class="secondary">Options</button>
           <button id="quit-btn" class="secondary" title="Progress since your last checkpoint will be lost">Quit to title</button>
         </div>
@@ -178,6 +181,19 @@
           <button id="inventory-close-btn">Back to battle</button>
         </div>
         <p class="inventory-hint" id="inventory-hint"></p>
+      </div>
+    </div>
+
+    <!-- A shop at Fort Victory (on the shopper's half in two-player) -->
+    <div id="shop-screen" class="overlay screen hidden">
+      <div class="panel shop-panel">
+        <h2 id="shop-title">Shop</h2>
+        <p class="subtitle" id="shop-sub"></p>
+        <div class="shop-items" id="shop-items"></div>
+        <div class="menu row">
+          <button id="shop-close-btn">Leave the shop</button>
+        </div>
+        <p class="inventory-hint" id="shop-hint"></p>
       </div>
     </div>
 
@@ -233,7 +249,7 @@
     <div id="death-screen" class="overlay hidden">
       <div class="panel">
         <h1 class="fallen">You have fallen</h1>
-        <p class="subtitle" id="death-sub">You will return to your last checkpoint.</p>
+        <p class="subtitle" id="death-sub">You and your army will return to Fort Victory. Nothing is lost.</p>
         <p class="tip" id="death-tip"></p>
         <button id="respawn-btn">Rise again</button>
       </div>

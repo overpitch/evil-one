@@ -25,7 +25,8 @@ const CONTROLS: [string, string][] = [
   ['Shift', 'Sprint'],
   ['M', 'Map'],
   ['I', 'Inventory (choose your weapon)'],
-  ['1 – 5', 'Quick-swap weapon'],
+  ['1 – 9', 'Quick-swap weapon'],
+  ['H', 'Drink a healing potion'],
   ['Esc', 'Pause'],
 ];
 
@@ -40,6 +41,7 @@ const PAD_CONTROLS: [string, string][] = [
   ['View', 'Map'],
   ['Y', 'Inventory (choose your weapon)'],
   ['D-pad left / right', 'Quick-swap weapon'],
+  ['D-pad up', 'Drink a healing potion'],
   ['Menu', 'Pause'],
 ];
 
@@ -59,6 +61,9 @@ const DEATH_TIPS = [
   'Broom-witches can only be hit when they skim low after a dive.',
   'Vampire knights parry swings from the front. Attack right after they swing.',
 ];
+
+/** One line in a shop: a heading, or something to buy, sell or trade. */
+export type ShopEntry = { heading: string } | { label: string; sub: string; disabled?: boolean; onClick: () => void };
 
 type Screen = 'title' | 'name' | 'intro' | 'options' | 'ending' | 'none';
 
@@ -122,6 +127,7 @@ export class HeroView {
   constructor(readonly root: HTMLElement) {
     for (const node of root.querySelectorAll<HTMLElement>('[data-s]')) this.el[node.dataset.s!] = node;
     this.floaterLayer = this.el.floaters;
+    this.el['potion-hint'].innerHTML = '<span class="keys-only">· H to drink</span><span class="pad-only">· D-pad ↑ to drink</span>';
   }
 
   update(player: Player, revivingIn: number | null) {
@@ -135,6 +141,11 @@ export class HeroView {
     e['xp-fill'].style.width = player.atMaxLevel ? '100%' : `${(player.xp / player.xpToNext) * 100}%`;
     e['xp-text'].textContent = player.atMaxLevel ? 'Max level' : `${player.xp} / ${player.xpToNext} XP`;
     e.slowed.classList.toggle('hidden', player.slowTimer <= 0);
+    const gold = String(player.goods.gold);
+    if (e.gold.textContent !== gold) e.gold.textContent = gold;
+    const potions = String(player.goods.potions);
+    if (e.potions.textContent !== potions) e.potions.textContent = potions;
+    e['potion-hint'].classList.toggle('hidden', player.goods.potions === 0);
     // A pulsing red edge when badly hurt.
     const low = player.alive && player.hp / player.maxHp < 0.3 ? 0.3 + 0.2 * Math.sin(performance.now() / 160) : 0;
     e.vignette.style.opacity = String(Math.max(player.hurtFlash, low));
@@ -202,6 +213,10 @@ export class Hud {
   onInventoryClose?: () => void;
   onEquip?: (id: WeaponId) => void;
   onTogglePlayer2?: () => void;
+  onShopClose?: () => void;
+  /** Pause menu: teleport the team to Fort Victory, or back to where they were. */
+  onGoToFort?: () => void;
+  onGoBack?: () => void;
   /** Player 2 picked a saved hero (by id), named a new one, or backed out. */
   onP2Pick?: (id: string) => void;
   onP2New?: (name: string) => void;
@@ -329,6 +344,9 @@ export class Hud {
     // Inventory: one card per weapon, built once and updated in place (so controller focus stays put).
     $('pause-inventory-btn').addEventListener('click', () => this.onInventory?.());
     $('pause-p2-btn').addEventListener('click', () => this.onTogglePlayer2?.());
+    $('pause-fort-btn').addEventListener('click', () => this.onGoToFort?.());
+    $('pause-back-btn').addEventListener('click', () => this.onGoBack?.());
+    $('shop-close-btn').addEventListener('click', () => this.onShopClose?.());
 
     // Who is Player 2?
     const p2Name = $<HTMLInputElement>('p2-name-input');
@@ -515,9 +533,13 @@ export class Hud {
       card.classList.toggle('locked', !have);
       card.classList.toggle('equipped', w.id === equipped);
       card.querySelector('.weapon-name')!.textContent = have ? w.name : '???';
-      card.querySelector('.weapon-from')!.textContent = !w.from
-        ? 'Your own blade'
-        : have
+      card.querySelector('.weapon-from')!.textContent = w.shop
+        ? have
+          ? 'From Fort Victory'
+          : "Buy it at Fort Victory's weaponsmith"
+        : !w.from
+          ? 'Your own blade'
+          : have
           ? `Won from ${leaderTitle(w.from)}`
           : `Defeat ${leaderTitle(w.from)} to claim it`;
       card.querySelector('.weapon-desc')!.textContent = have ? w.description : '';
@@ -560,6 +582,52 @@ export class Hud {
       el.textContent = hint;
       this.mapScreen.querySelector('.map-hint')!.textContent = controller ? 'View · Close map' : 'M · Close map';
     }
+  }
+
+  // ---------- Shops ----------
+
+  get shopOpen() {
+    return !$('shop-screen').classList.contains('hidden');
+  }
+
+  /** `side`: two-player, the shop covers only the shopper's half of the screen. */
+  showShop(show: boolean, side: 'left' | 'right' | null = null) {
+    const el = $('shop-screen');
+    el.classList.toggle('hidden', !show);
+    el.classList.toggle('side-left', side === 'left');
+    el.classList.toggle('side-right', side === 'right');
+  }
+
+  /**
+   * Fills the shop: headings and buttons. Buttons are reused where possible
+   * so a controller's highlight stays put after buying or selling.
+   */
+  renderShop(title: string, sub: string, entries: ShopEntry[], usingPad: boolean) {
+    $('shop-title').textContent = title;
+    $('shop-sub').textContent = sub;
+    $('shop-hint').textContent = usingPad ? 'A · Buy    B · Leave the shop' : 'Click to buy    Esc · Leave the shop';
+    const list = $('shop-items');
+    const old = [...list.children] as HTMLElement[];
+    const fresh = entries.map((entry, i) => {
+      const reuse = old[i];
+      if ('heading' in entry) {
+        const h = reuse?.tagName === 'H3' ? reuse : document.createElement('h3');
+        h.textContent = entry.heading;
+        return h;
+      }
+      const b = (reuse?.tagName === 'BUTTON' ? reuse : document.createElement('button')) as HTMLButtonElement;
+      b.className = 'shop-item';
+      b.disabled = !!entry.disabled;
+      b.replaceChildren(entry.label, Object.assign(document.createElement('span'), { className: 'button-sub', textContent: entry.sub }));
+      b.onclick = entry.disabled ? null : entry.onClick;
+      return b;
+    });
+    list.replaceChildren(...fresh);
+  }
+
+  /** Pause menu: show "Go back" after teleporting to the fort. */
+  setGoBackAvailable(available: boolean) {
+    $('pause-back-btn').classList.toggle('hidden', !available);
   }
 
   setPauseInventoryLabel(label: string) {
