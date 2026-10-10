@@ -15,6 +15,8 @@ export interface SaveData {
   weapons?: string[];
   /** The weapon in the hero's hand. */
   weapon?: string;
+  /** Player 2's own weapons, kept between visits. */
+  player2?: { weapons: string[]; weapon: string };
   /** Seconds of play so far. */
   playTime?: number;
   savedAt: number;

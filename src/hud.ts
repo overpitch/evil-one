@@ -442,8 +442,11 @@ export class Hud {
     return !this.inventory.classList.contains('hidden');
   }
 
-  showInventory(show: boolean) {
+  /** `side`: two-player, the inventory covers only that hero's half of the screen. */
+  showInventory(show: boolean, side: 'left' | 'right' | null = null) {
     this.inventory.classList.toggle('hidden', !show);
+    this.inventory.classList.toggle('side-left', side === 'left');
+    this.inventory.classList.toggle('side-right', side === 'right');
   }
 
   /** Fills in the inventory cards: what's owned, what's still to win, and what's in hand. */
@@ -467,6 +470,10 @@ export class Hud {
     $('inventory-hint').textContent = usingPad
       ? 'A · Equip    B or Y · Back to battle    In battle, the d-pad left/right swaps weapons'
       : 'Click a weapon to equip it    I or Esc · Back to battle    In battle, keys 1–5 swap weapons';
+  }
+
+  setPauseInventoryLabel(label: string) {
+    $('pause-inventory-btn').textContent = label;
   }
 
   /** Splits the screen into two views (two-player) or one. */

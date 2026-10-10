@@ -61,6 +61,9 @@ const camCtrl2 = new ThirdPersonCamera(camera2);
 const input = new Input(renderer.domElement);
 /** Player 2 plays with a controller only. */
 const input2 = new Input(renderer.domElement, false);
+/** No buttons pressed: a hero stands still while their inventory is open (two-player). */
+const noInput = new Input(renderer.domElement, false);
+noInput.padIndex = -1;
 const hud = new Hud(settings);
 const floaters = new Floaters(hud.views[0].floaterLayer);
 const floaters2 = new Floaters(hud.views[1].floaterLayer);
@@ -118,6 +121,9 @@ let playTime = 0;
 let endingShown = false;
 /** Weapons the hero has claimed. */
 const owned = new Set<WeaponId>([STARTING_WEAPON]);
+/** Player 2's own weapons (each hero has their own inventory). */
+const owned2 = new Set<WeaponId>([STARTING_WEAPON]);
+const ownedBy = (h: Player) => (h === player2 ? owned2 : owned);
 
 const ctx: GameContext = {
   scene,
@@ -177,7 +183,7 @@ const campaign = new Campaign(scene, world, enemies, {
   bossEnded: () => hud.showBoss(null),
   leaderDefeated: (id, at) => {
     const w = weaponOf(id);
-    if (w && !owned.has(w.id)) drops.place(w.id, at.x, at.z);
+    if (w && ctx.players.some((h) => !ownedBy(h).has(w.id))) drops.place(w.id, at.x, at.z);
   },
   victory: () => {
     saveGame();
@@ -226,6 +232,7 @@ function saveGame() {
     playTime: Math.round(playTime),
     weapons: [...owned],
     weapon: player.weapon.id,
+    player2: player2Fields(),
     ...campaign.saveFields(),
     savedAt: Date.now(),
   });
@@ -237,7 +244,31 @@ function saveGame() {
  */
 function saveWeapons() {
   const save = loadSave();
-  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id });
+  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id, player2: player2Fields() ?? save.player2 });
+}
+
+/** Player 2's weapons for the save (kept from an earlier visit if they aren't playing now). */
+function player2Fields() {
+  if (!twoPlayer) return loadSave()?.player2;
+  return { weapons: [...owned2], weapon: player2.weapon.id };
+}
+
+/** Player 2's own weapons, from the save (or just the sword the first time). */
+function loadPlayer2Weapons() {
+  const saved = loadSave()?.player2;
+  owned2.clear();
+  owned2.add(STARTING_WEAPON);
+  for (const id of saved?.weapons ?? []) if (isWeaponId(id)) owned2.add(id);
+  player2.setWeapon(isWeaponId(saved?.weapon) && owned2.has(saved.weapon) ? saved.weapon : STARTING_WEAPON);
+}
+
+/** Puts each beaten leader's weapon back in its lair until every hero playing has their own. */
+function placeMissingDrops(leaders: Iterable<string>) {
+  for (const id of leaders) {
+    const w = weaponOf(id);
+    const land = TERRITORIES.find((t) => t.leader.id === id);
+    if (w && land && ctx.players.some((h) => !ownedBy(h).has(w.id)) && !drops.isOut(w.id)) drops.place(w.id, land.arena.x, land.arena.z);
+  }
 }
 
 /** Sets up the hero's weapons from a save, and puts unclaimed leader weapons back in their arenas. */
@@ -249,37 +280,38 @@ function loadWeapons(save: SaveData | null) {
   const claimed = save?.weapons ?? leaders.map((id) => weaponOf(id)?.id);
   for (const id of claimed) if (isWeaponId(id)) owned.add(id);
   player.setWeapon(isWeaponId(save?.weapon) && owned.has(save.weapon) ? save.weapon : STARTING_WEAPON);
+  if (twoPlayer) loadPlayer2Weapons();
   drops.clear();
-  for (const id of leaders) {
-    const w = weaponOf(id);
-    const land = TERRITORIES.find((t) => t.leader.id === id);
-    if (w && land && !owned.has(w.id)) drops.place(w.id, land.arena.x, land.arena.z);
-  }
+  placeMissingDrops(leaders);
 }
 
 /** Whose weapon the open inventory is choosing. */
 let inventoryFor: Player = player;
+/** Who opened the pause menu (its Inventory button opens their inventory). */
+let pausedBy: Player = player;
 
 const inputOf = (h: Player) => (h === player2 ? input2 : input);
 
 function renderInventory() {
   const chooser = twoPlayer ? inventoryFor.name : undefined;
-  hud.renderInventory(owned, inventoryFor.weapon.id, inputOf(inventoryFor).mode === 'gamepad', chooser);
+  hud.renderInventory(ownedBy(inventoryFor), inventoryFor.weapon.id, inputOf(inventoryFor).mode === 'gamepad', chooser);
 }
 
 function equip(w: WeaponDef, announce: boolean, hero: Player = player) {
-  if (!owned.has(w.id) || hero.weapon === w) return;
+  if (!ownedBy(hero).has(w.id) || hero.weapon === w) return;
   hero.setWeapon(w.id);
   sfx.block(0.5);
-  if (hero === player) saveWeapons();
+  saveWeapons();
   if (announce) hud.announce(w.name, twoPlayer ? `${hero.name} equipped it` : 'Equipped');
   if (hud.inventoryOpen) renderInventory();
 }
 
-/** Walked into a fallen leader's weapon: it's yours (both heroes'), and in the finder's hand. */
+/** Walked into a fallen leader's weapon: it's this hero's, and in their hand. It stays until every hero has one. */
 function claimWeapon(w: WeaponDef, hero: Player) {
-  owned.add(w.id);
+  ownedBy(hero).add(w.id);
   hero.setWeapon(w.id);
+  if (ctx.players.every((h) => ownedBy(h).has(w.id))) drops.remove(w.id);
+  else hud.announce(`${w.name} is still here`, `The other hero can grab one too`);
   saveWeapons();
   sfx.levelUp();
   ctx.addShake(0.2);
@@ -294,7 +326,8 @@ function openInventory(hero: Player = player) {
   hud.showMap(false);
   hud.showPause(false);
   renderInventory();
-  hud.showInventory(true);
+  // Two-player: the inventory covers only this hero's half, and the other keeps playing.
+  hud.showInventory(true, twoPlayer ? (hero === player ? 'left' : 'right') : null);
   if (document.pointerLockElement) document.exitPointerLock();
 }
 
@@ -338,7 +371,7 @@ function enterWorld(save: SaveData) {
   player.reset(spot.x, spot.z);
   if (twoPlayer) {
     syncPlayer2();
-    if (!owned.has(player2.weapon.id)) player2.setWeapon(STARTING_WEAPON);
+    if (!owned2.has(player2.weapon.id)) player2.setWeapon(STARTING_WEAPON);
     player2.reset(spot.x - 1.6, spot.z);
   }
   reinforceSquad(true);
@@ -434,7 +467,8 @@ function joinPlayer2(padIndex: number) {
   if (input.lastPadIndex === padIndex) input.lastPadIndex = null;
   ctx.players = [player, player2];
   player2.loadHero('Player 2', player.level, player.xp);
-  player2.setWeapon(player.weapon.id);
+  loadPlayer2Weapons();
+  placeMissingDrops(campaign.leaders);
   // Appear at Player 1's left (the camera looks over the right shoulder).
   const side = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw)).multiplyScalar(1.6);
   player2.reset(player.pos.x + side.x, player.pos.z + side.z);
@@ -452,6 +486,7 @@ function joinPlayer2(padIndex: number) {
 
 function leavePlayer2() {
   if (!twoPlayer) return;
+  saveWeapons(); // keep Player 2's weapons for next time
   twoPlayer = false;
   waitingForP2 = false;
   input.exclude = null;
@@ -570,7 +605,7 @@ hud.onBegin = () => {
   lockPointer();
 };
 hud.onResume = lockPointer;
-hud.onInventory = () => openInventory(player);
+hud.onInventory = () => openInventory(pausedBy);
 hud.onInventoryClose = closeInventory;
 hud.onEquip = (id) => equip(WEAPONS.find((w) => w.id === id)!, false, inventoryFor);
 hud.onRespawn = () => {
@@ -583,7 +618,11 @@ hud.onSettings = (s) => {
   saveSettings(s);
 };
 input.onLockChange = (locked) => {
-  if (!locked) hud.showMap(false);
+  if (!locked) {
+    hud.showMap(false);
+    pausedBy = player;
+    hud.setPauseInventoryLabel(twoPlayer ? `${player.name}'s inventory` : 'Inventory');
+  }
   if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !endingShown) hud.showPause(!locked && ctx.players.some((h) => h.alive));
 };
 
@@ -715,7 +754,10 @@ function tick(realDt: number) {
   const menuPressed = (input.mode === 'gamepad' && input.pausePressed) || (twoPlayer && input2.pausePressed);
   const resumed = menuPressed && hud.pauseOpen;
   if (resumed) hud.showPause(false);
-  menuNav.update(inputs);
+  // Two-player inventory: on one hero's half only. Only their controller works it, and the game goes on.
+  const sideInventory = twoPlayer && hud.inventoryOpen;
+  const browsing = sideInventory ? inventoryFor : null;
+  menuNav.update(browsing ? [inputOf(browsing)] : inputs);
 
   if (phase === 'menu') {
     player.idle(realDt);
@@ -723,34 +765,50 @@ function tick(realDt: number) {
     updateMenuCamera(realDt);
   } else {
     // With a controller there's no mouse capture: play whenever no menu is open.
-    const padPlay = (input.mode === 'gamepad' || IS_XBOX || twoPlayer) && !menuNav.menuOpen;
-    if (padPlay && menuPressed && !resumed) hud.showPause(true);
+    const padPlay = (input.mode === 'gamepad' || IS_XBOX || twoPlayer) && (!menuNav.menuOpen || sideInventory);
+    if (padPlay && menuPressed && !resumed) {
+      pausedBy = twoPlayer && input2.pausePressed ? player2 : player;
+      hud.setPauseInventoryLabel(twoPlayer ? `${pausedBy.name}'s inventory` : 'Inventory');
+      hud.showPause(true);
+    }
+    let closedNow = false;
     if (hud.inventoryOpen) {
-      // The game waits while a hero picks a weapon.
-      if (inputs.some((i) => i.inventoryPressed) || input.escapePressed) closeInventory();
-    } else if ((input.locked || padPlay || testMode) && !endingShown) {
+      // One player: the game waits while the hero picks a weapon. Only the chooser can close it.
+      const chooser = inputOf(inventoryFor);
+      if (chooser.inventoryPressed || (inventoryFor === player && input.escapePressed)) {
+        closeInventory();
+        closedNow = true;
+      }
+    }
+    if ((!hud.inventoryOpen || sideInventory) && !closedNow && (input.locked || padPlay || testMode) && !endingShown) {
       playTime += realDt;
-      if (inputs.some((i) => i.mapPressed)) hud.showMap(!hud.mapOpen);
-      if (input.inventoryPressed && player.alive) openInventory(player);
-      else if (twoPlayer && input2.inventoryPressed && player2.alive) openInventory(player2);
-      updateWeaponSwap();
-      camCtrl.applyInput(input, realDt);
-      if (twoPlayer) camCtrl2.applyInput(input2, realDt);
+      const chooserInput = browsing ? inputOf(browsing) : null;
+      if (inputs.some((i) => i !== chooserInput && i.mapPressed)) hud.showMap(!hud.mapOpen);
+      if (!hud.inventoryOpen) {
+        if (input.inventoryPressed && player.alive) openInventory(player);
+        else if (twoPlayer && input2.inventoryPressed && player2.alive) openInventory(player2);
+      }
+      updateWeaponSwap(browsing);
+      // The hero choosing a weapon stands still; the other plays on.
+      const in1 = browsing === player ? noInput : input;
+      const in2 = browsing === player2 ? noInput : input2;
+      camCtrl.applyInput(in1, realDt);
+      if (twoPlayer) camCtrl2.applyInput(in2, realDt);
       let dt = realDt;
       // Hit-stop: freeze the action for a few frames when a blow lands.
       if (hitStopTimer > 0) {
         hitStopTimer -= realDt;
         dt *= 0.06;
       }
-      player.update(dt, ctx, input, camCtrl.yaw);
-      if (twoPlayer) player2.update(dt, ctx, input2, camCtrl2.yaw);
+      player.update(dt, ctx, in1, camCtrl.yaw);
+      if (twoPlayer) player2.update(dt, ctx, in2, camCtrl2.yaw);
       updateRevives();
       for (const a of allies) a.update(dt, ctx);
       updateEnemies(dt);
       separateBodies();
       campaign.update(dt, ctx);
       projectiles.update(dt, ctx);
-      const claimed = drops.update(dt, ctx.players.filter((h) => h.alive), particles);
+      const claimed = drops.update(dt, ctx.players.filter((h) => h.alive), particles, (h, w) => !ownedBy(h).has(w.id));
       if (claimed) claimWeapon(claimed.weapon, claimed.by);
       particles.update(dt);
       floaters.update(dt, camera);
@@ -827,8 +885,8 @@ function prepareView(cam: THREE.Camera) {
 }
 
 /** Number keys pick a weapon; the d-pad steps through the ones you own. */
-function updateWeaponSwap() {
-  if (player.alive) {
+function updateWeaponSwap(browsing: Player | null) {
+  if (player.alive && browsing !== player) {
     const slot = input.weaponSlotPressed;
     if (slot !== null && WEAPONS[slot]) {
       if (owned.has(WEAPONS[slot].id)) equip(WEAPONS[slot], true);
@@ -836,9 +894,10 @@ function updateWeaponSwap() {
     }
   }
   for (const h of ctx.players) {
+    if (h === browsing) continue;
     const step = inputOf(h).weaponCyclePressed;
-    if (!h.alive || step === 0 || owned.size < 2) continue;
-    const mine = WEAPONS.filter((w) => owned.has(w.id));
+    if (!h.alive || step === 0 || ownedBy(h).size < 2) continue;
+    const mine = WEAPONS.filter((w) => ownedBy(h).has(w.id));
     const i = mine.indexOf(h.weapon);
     equip(mine[(i + step + mine.length) % mine.length], true, h);
   }

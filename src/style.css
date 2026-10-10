@@ -1033,3 +1033,23 @@ button.weapon-card.locked {
   font-size: 18px;
   padding: 10px 24px;
 }
+
+/* Two-player: the inventory covers only the chooser's half of the screen. */
+#inventory-screen.side-left {
+  right: 50%;
+}
+
+#inventory-screen.side-right {
+  left: 50%;
+}
+
+#inventory-screen.side-left .weapon-grid,
+#inventory-screen.side-right .weapon-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+#inventory-screen.side-left .weapon-desc,
+#inventory-screen.side-right .weapon-desc {
+  display: none;
+}

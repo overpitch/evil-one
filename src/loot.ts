@@ -71,8 +71,26 @@ export class WeaponDrops {
     return best ? { weapon: best.weapon, at: best.pos } : null;
   }
 
-  /** Spins the weapons; returns one a hero just walked into, and who. */
-  update<H extends { pos: THREE.Vector3 }>(dt: number, heroes: H[], particles: Particles): { weapon: WeaponDef; by: H } | null {
+  /** Takes a weapon off the ground (every hero has one now). */
+  remove(id: WeaponId) {
+    const d = this.drops.get(id);
+    if (!d) return;
+    d.active = false;
+    d.group.visible = false;
+  }
+
+  /** The weapon is lying on the ground somewhere. */
+  isOut(id: WeaponId) {
+    return this.drops.get(id)?.active ?? false;
+  }
+
+  /** Spins the weapons; returns one a hero who still `needs` it just walked into, and who. */
+  update<H extends { pos: THREE.Vector3 }>(
+    dt: number,
+    heroes: H[],
+    particles: Particles,
+    needs: (hero: H, weapon: WeaponDef) => boolean,
+  ): { weapon: WeaponDef; by: H } | null {
     this.time += dt;
     let picked: { weapon: WeaponDef; by: H } | null = null;
     for (const d of this.drops.values()) {
@@ -85,10 +103,8 @@ export class WeaponDrops {
         d.sparkle = 0.25;
         particles.burst(new THREE.Vector3(d.pos.x, d.pos.y + 1.3, d.pos.z), d.weapon.color, 2, 1.5);
       }
-      const hero = heroes.find((h) => Math.hypot(h.pos.x - d.pos.x, h.pos.z - d.pos.z) < PICKUP_RADIUS);
+      const hero = heroes.find((h) => needs(h, d.weapon) && Math.hypot(h.pos.x - d.pos.x, h.pos.z - d.pos.z) < PICKUP_RADIUS);
       if (hero && !picked) {
-        d.active = false;
-        d.group.visible = false;
         particles.burst(new THREE.Vector3(d.pos.x, d.pos.y + 1.3, d.pos.z), d.weapon.color, 30, 6);
         particles.burst(new THREE.Vector3(d.pos.x, d.pos.y + 1.3, d.pos.z), 0xffd36b, 16, 4);
         picked = { weapon: d.weapon, by: hero };
