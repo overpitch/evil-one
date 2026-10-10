@@ -6,7 +6,7 @@ import type { SaveData } from './save';
 import { drawMap, type MapData } from './map';
 import { sfx } from './audio';
 import { TERRITORIES } from './layout';
-import { WEAPONS, weaponIcon, type WeaponDef, type WeaponId } from './weapons';
+import { WEAPONS, weaponIcon, type WeaponId } from './weapons';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -94,6 +94,78 @@ export function cleanName(raw: string): { name: string } | { error: string } {
   return { name };
 }
 
+/**
+ * One hero's part of the screen: status bars, crosshair, damage numbers,
+ * objective marker and hurt glow. The whole screen in one-player, a half in two-player.
+ */
+export class HeroView {
+  readonly floaterLayer: HTMLElement;
+  private shownWeapon: WeaponId | null = null;
+  private readonly el: Record<string, HTMLElement> = {};
+  private readonly projected = new THREE.Vector3();
+
+  constructor(readonly root: HTMLElement) {
+    for (const node of root.querySelectorAll<HTMLElement>('[data-s]')) this.el[node.dataset.s!] = node;
+    this.floaterLayer = this.el.floaters;
+  }
+
+  update(player: Player, revivingIn: number | null) {
+    const e = this.el;
+    e.name.textContent = player.name;
+    e.level.textContent = `Lv ${player.level}`;
+    e['hp-fill'].style.width = `${(player.hp / player.maxHp) * 100}%`;
+    e['hp-text'].textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
+    e['st-fill'].style.width = `${(player.stamina / player.maxStamina) * 100}%`;
+    e['st-bar'].classList.toggle('low', player.stamina < 22);
+    e['xp-fill'].style.width = player.atMaxLevel ? '100%' : `${(player.xp / player.xpToNext) * 100}%`;
+    e['xp-text'].textContent = player.atMaxLevel ? 'Max level' : `${player.xp} / ${player.xpToNext} XP`;
+    e.slowed.classList.toggle('hidden', player.slowTimer <= 0);
+    // A pulsing red edge when badly hurt.
+    const low = player.alive && player.hp / player.maxHp < 0.3 ? 0.3 + 0.2 * Math.sin(performance.now() / 160) : 0;
+    e.vignette.style.opacity = String(Math.max(player.hurtFlash, low));
+    // Two-player: a fallen hero comes back beside the other one.
+    e.down.classList.toggle('hidden', revivingIn === null);
+    if (revivingIn !== null) {
+      const text = `You have fallen · back in ${Math.max(1, Math.ceil(revivingIn))}`;
+      if (e.down.textContent !== text) e.down.textContent = text;
+    }
+    if (this.shownWeapon !== player.weapon.id) {
+      this.shownWeapon = player.weapon.id;
+      e['weapon-icon'].innerHTML = weaponIcon(player.weapon);
+      e['weapon-name'].textContent = player.weapon.name;
+    }
+  }
+
+  /** A marker over the objective, pinned to the edge of this view when it's off-screen. */
+  setMarker(at: THREE.Vector3 | null, camera: THREE.Camera, from: THREE.Vector3) {
+    const marker = this.el.marker;
+    const dist = at ? Math.hypot(at.x - from.x, at.z - from.z) : 0;
+    if (!at || dist < 8) {
+      marker.classList.add('hidden');
+      return;
+    }
+    marker.classList.remove('hidden');
+    this.el['marker-dist'].textContent = `${Math.round(dist)} m`;
+
+    const w = this.root.clientWidth;
+    const h = this.root.clientHeight;
+    const p = this.projected.set(at.x, at.y + 4, at.z).project(camera);
+    const behind = p.z > 1;
+    let dx = p.x * (behind ? -1 : 1) * (w / 2);
+    let dy = -p.y * (behind ? -1 : 1) * (h / 2);
+    const margin = 48;
+    const limitX = w / 2 - margin;
+    const limitY = h / 2 - margin;
+    if (behind || Math.abs(dx) > limitX || Math.abs(dy) > limitY) {
+      if (behind && dy < 0) dy = Math.abs(dy) + 1; // behind you: pin to the bottom
+      const scale = Math.min(limitX / Math.max(Math.abs(dx), 1e-3), limitY / Math.max(Math.abs(dy), 1e-3));
+      dx *= scale;
+      dy *= scale;
+    }
+    marker.style.transform = `translate(${w / 2 + dx}px, ${h / 2 + dy}px) translate(-50%, -50%)`;
+  }
+}
+
 /** DOM overlay: status bars, messages, objective marker, map, and every menu screen. */
 export class Hud {
   onContinue?: () => void;
@@ -109,27 +181,17 @@ export class Hud {
   onInventory?: () => void;
   onInventoryClose?: () => void;
   onEquip?: (id: WeaponId) => void;
+  onTogglePlayer2?: () => void;
 
-  readonly floaterLayer = $('floaters');
+  /** Player 1's view, then Player 2's. */
+  readonly views: [HeroView, HeroView];
 
   private readonly hud = $('hud');
-  private readonly heroName = $('hero-name');
-  private readonly levelBadge = $('level-badge');
-  private readonly hpFill = $('hp-fill');
-  private readonly hpText = $('hp-text');
-  private readonly stFill = $('st-fill');
-  private readonly stBar = $('st-bar');
-  private readonly xpFill = $('xp-fill');
-  private readonly xpText = $('xp-text');
   private readonly kills = $('kills');
-  private readonly slowed = $('slowed');
-  private readonly vignette = $('vignette');
   private readonly objective = $('objective');
   private readonly boss = $('boss');
   private readonly bossName = $('boss-name');
   private readonly bossFill = $('boss-fill');
-  private readonly marker = $('marker');
-  private readonly markerDist = $('marker-dist');
   private readonly announceEl = $('announce');
   private readonly subtitle = $('subtitle-line');
   private readonly screens: Record<Exclude<Screen, 'none'>, HTMLElement> = {
@@ -147,7 +209,6 @@ export class Hud {
   private readonly nameError = $('name-error');
   private readonly inventory = $('inventory-screen');
   private readonly weaponCards = new Map<WeaponId, HTMLButtonElement>();
-  private shownWeapon: WeaponId | null = null;
 
   private settings: Settings;
   /** Where the Options screen's Back button returns to. */
@@ -156,10 +217,13 @@ export class Hud {
   private announcing = false;
   private subtitleTimer = 0;
   private hasSave = false;
-  private readonly projected = new THREE.Vector3();
 
   constructor(settings: Settings) {
     this.settings = { ...settings };
+    const view1 = $('view1');
+    const view2 = $('view2');
+    view2.replaceChildren(...[...view1.children].map((c) => c.cloneNode(true)));
+    this.views = [new HeroView(view1), new HeroView(view2)];
     for (const dl of document.querySelectorAll('[data-controls]')) {
       for (const [keys, action] of CONTROLS) {
         const dt = document.createElement('dt');
@@ -240,6 +304,7 @@ export class Hud {
 
     // Inventory: one card per weapon, built once and updated in place (so controller focus stays put).
     $('pause-inventory-btn').addEventListener('click', () => this.onInventory?.());
+    $('pause-p2-btn').addEventListener('click', () => this.onTogglePlayer2?.());
     $('inventory-close-btn').addEventListener('click', () => this.onInventoryClose?.());
     const grid = $('weapon-grid');
     WEAPONS.forEach((w, i) => {
@@ -382,7 +447,10 @@ export class Hud {
   }
 
   /** Fills in the inventory cards: what's owned, what's still to win, and what's in hand. */
-  renderInventory(owned: ReadonlySet<WeaponId>, equipped: WeaponId, usingPad: boolean) {
+  renderInventory(owned: ReadonlySet<WeaponId>, equipped: WeaponId, usingPad: boolean, chooser?: string) {
+    this.inventory.querySelector('.subtitle')!.textContent = chooser
+      ? `Choosing ${chooser}'s weapon. Each leader you defeat drops a new one.`
+      : 'Choose your weapon. Each leader you defeat drops a new one.';
     for (const w of WEAPONS) {
       const card = this.weaponCards.get(w.id)!;
       const have = owned.has(w.id);
@@ -401,12 +469,12 @@ export class Hud {
       : 'Click a weapon to equip it    I or Esc · Back to battle    In battle, keys 1–5 swap weapons';
   }
 
-  /** The weapon shown under the status bars. */
-  setWeapon(w: WeaponDef) {
-    if (this.shownWeapon === w.id) return;
-    this.shownWeapon = w.id;
-    $('weapon-tag-icon').innerHTML = weaponIcon(w);
-    $('weapon-tag-name').textContent = w.name;
+  /** Splits the screen into two views (two-player) or one. */
+  setSplit(on: boolean) {
+    this.hud.classList.toggle('split', on);
+    $('view2').classList.toggle('hidden', !on);
+    $('split-line').classList.toggle('hidden', !on);
+    $('pause-p2-btn').textContent = on ? 'Remove Player 2' : 'Add Player 2';
   }
 
   setPadDebug(text: string) {
@@ -571,37 +639,9 @@ export class Hud {
 
   // ---------- Objective ----------
 
-  /** Objective text at the top, and a marker over the target (pinned to the screen edge when off-screen). */
-  setObjective(text: string, at: THREE.Vector3 | null, camera: THREE.Camera, from: THREE.Vector3) {
+  /** Objective text at the top of the screen. */
+  setObjective(text: string) {
     if (this.objective.textContent !== text) this.objective.textContent = text;
-    if (!at) {
-      this.marker.classList.add('hidden');
-      return;
-    }
-    const dist = Math.hypot(at.x - from.x, at.z - from.z);
-    if (dist < 8) {
-      this.marker.classList.add('hidden');
-      return;
-    }
-    this.marker.classList.remove('hidden');
-    this.markerDist.textContent = `${Math.round(dist)} m`;
-
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const p = this.projected.set(at.x, at.y + 4, at.z).project(camera);
-    const behind = p.z > 1;
-    let dx = p.x * (behind ? -1 : 1) * (w / 2);
-    let dy = -p.y * (behind ? -1 : 1) * (h / 2);
-    const margin = 48;
-    const limitX = w / 2 - margin;
-    const limitY = h / 2 - margin;
-    if (behind || Math.abs(dx) > limitX || Math.abs(dy) > limitY) {
-      if (behind && dy < 0) dy = Math.abs(dy) + 1; // behind you: pin to the bottom
-      const scale = Math.min(limitX / Math.max(Math.abs(dx), 1e-3), limitY / Math.max(Math.abs(dy), 1e-3));
-      dx *= scale;
-      dy *= scale;
-    }
-    this.marker.style.transform = `translate(${w / 2 + dx}px, ${h / 2 + dy}px) translate(-50%, -50%)`;
   }
 
   // ---------- Map ----------
@@ -620,19 +660,7 @@ export class Hud {
 
   // ---------- Status ----------
 
-  update(player: Player, kills: number) {
-    this.heroName.textContent = player.name;
-    this.levelBadge.textContent = `Lv ${player.level}`;
-    this.hpFill.style.width = `${(player.hp / player.maxHp) * 100}%`;
-    this.hpText.textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
-    this.stFill.style.width = `${(player.stamina / player.maxStamina) * 100}%`;
-    this.stBar.classList.toggle('low', player.stamina < 22);
-    this.xpFill.style.width = player.atMaxLevel ? '100%' : `${(player.xp / player.xpToNext) * 100}%`;
-    this.xpText.textContent = player.atMaxLevel ? 'Max level' : `${player.xp} / ${player.xpToNext} XP`;
+  update(kills: number) {
     this.kills.textContent = `Enemies slain: ${kills}`;
-    this.slowed.classList.toggle('hidden', player.slowTimer <= 0);
-    // A pulsing red edge when badly hurt.
-    const low = player.alive && player.hp / player.maxHp < 0.3 ? 0.3 + 0.2 * Math.sin(performance.now() / 160) : 0;
-    this.vignette.style.opacity = String(Math.max(player.hurtFlash, low));
   }
 }

@@ -62,7 +62,7 @@ export class Shockwave {
     this.radius += SHOCKWAVE_SPEED * dt;
     this.mesh.scale.setScalar(this.radius);
     this.material.opacity = 0.85 * (1 - this.radius / SHOCKWAVE_RADIUS);
-    for (const t of [ctx.player as Target, ...ctx.allies]) {
+    for (const t of [...ctx.players, ...ctx.allies]) {
       if (!t.alive || this.hit.has(t)) continue;
       const d = Math.hypot(t.pos.x - this.center.x, t.pos.z - this.center.z);
       if (Math.abs(d - this.radius) < 0.8) {

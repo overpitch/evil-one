@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { GameContext, Target } from './types';
 import type { Enemy } from './enemy';
+import type { Player } from './player';
 import { heightAt } from './world';
 import { sfx, volumeAt } from './audio';
 
@@ -36,8 +37,8 @@ interface Projectile {
   life: number;
   damage: number;
   homingTarget: Target | null;
-  /** Thrown by the hero: hurts enemies instead of humans. */
-  friendly: boolean;
+  /** The hero who threw it (it hurts enemies instead of humans), or null for enemy spells. */
+  owner: Player | null;
   /** Meteors fall onto a marked spot. */
   impact: THREE.Vector3;
   mesh: THREE.Group;
@@ -74,7 +75,7 @@ export class Projectiles {
         life: 0,
         damage: 0,
         homingTarget: null,
-        friendly: false,
+        owner: null,
         impact: new THREE.Vector3(),
         mesh,
         marker,
@@ -91,7 +92,7 @@ export class Projectiles {
     p.life = spec.life;
     p.damage = damage;
     p.homingTarget = null;
-    p.friendly = false;
+    p.owner = null;
     p.mesh.visible = true;
     p.mesh.scale.setScalar(spec.radius * 0.6);
     const [outer, inner] = p.mesh.children as THREE.Mesh[];
@@ -113,10 +114,10 @@ export class Projectiles {
   }
 
   /** The hero's fire bolt: flies straight along `dir` and hurts the first enemy it meets. */
-  fireFriendly(from: THREE.Vector3, dir: THREE.Vector3, damage: number) {
+  fireFriendly(from: THREE.Vector3, dir: THREE.Vector3, damage: number, owner: Player) {
     const p = this.take('hexfire', damage);
     if (!p) return;
-    p.friendly = true;
+    p.owner = owner;
     p.pos.copy(from);
     p.vel.copy(dir).setY(0).normalize().multiplyScalar(SPECS.hexfire.speed);
     p.mesh.position.copy(p.pos);
@@ -168,21 +169,22 @@ export class Projectiles {
         continue;
       }
 
-      if (p.friendly) {
+      if (p.owner) {
         const enemy = this.enemyAt(p, ctx);
         if (enemy) {
           const dir = this.tmp.copy(p.vel).normalize();
-          enemy.takeHit(p.damage, dir, 5, false, ctx, ctx.player);
+          enemy.takeHit(p.damage, dir, 5, false, ctx, p.owner);
           ctx.particles.burst(p.pos, spec.color, 14, 4);
           this.kill(p);
           continue;
         }
       }
       // Hit a human?
-      const hit = p.friendly ? null : this.humanAt(p, ctx);
+      const hit = p.owner ? null : this.humanAt(p, ctx);
       if (hit) {
         const result = hit.takeDamage(p.damage, p.pos, ctx);
-        if (p.kind === 'hexorb' && result === 'hit' && hit === ctx.player) ctx.player.applySlow(SLOW_SECONDS);
+        const hero = ctx.players.find((h) => h === hit);
+        if (p.kind === 'hexorb' && result === 'hit' && hero) hero.applySlow(SLOW_SECONDS);
         ctx.particles.burst(p.pos, result === 'blocked' ? 0xffd36b : spec.color, 12, 4);
         this.kill(p);
         continue;
@@ -215,7 +217,7 @@ export class Projectiles {
 
   private humanAt(p: Projectile, ctx: GameContext): Target | null {
     const r = SPECS[p.kind].radius + 0.4;
-    for (const t of [ctx.player as Target, ...ctx.allies]) {
+    for (const t of [...ctx.players, ...ctx.allies]) {
       if (!t.alive) continue;
       const dy = p.pos.y - (t.pos.y + 1);
       if (Math.abs(dy) > 1.1) continue;
@@ -231,7 +233,7 @@ export class Projectiles {
     const dist = at.distanceTo(ctx.player.pos);
     sfx.explode(volumeAt(dist));
     if (dist < 12) ctx.addShake(0.25);
-    for (const t of [ctx.player as Target, ...ctx.allies]) {
+    for (const t of [...ctx.players, ...ctx.allies]) {
       if (t.alive && Math.hypot(t.pos.x - at.x, t.pos.z - at.z) < METEOR_BLAST) t.takeDamage(p.damage, at, ctx, true);
     }
     this.kill(p);

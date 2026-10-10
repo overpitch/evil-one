@@ -31,9 +31,11 @@ export class MenuNavigator {
     return SCREENS.some((id) => visible(document.getElementById(id)!));
   }
 
-  update(input: Input) {
+  /** Player 1's input first; Player 2's controller (if joined) can drive the menus too. */
+  update(inputs: Input[]) {
+    const pads = inputs.filter((i) => i.mode === 'gamepad' && !i.cursorActive);
     // Pointing with a cursor (mouse, or Edge on Xbox in browser mode): clicks do the work.
-    if (input.mode !== 'gamepad' || input.cursorActive) {
+    if (pads.length === 0) {
       this.setFocus(null);
       return;
     }
@@ -58,7 +60,8 @@ export class MenuNavigator {
     const current = this.focused;
     const index = items.indexOf(current);
 
-    switch (input.nav) {
+    const nav = pads.map((i) => i.nav).find((d) => d !== null) ?? null;
+    switch (nav) {
       case 'up':
         this.setFocus(items[(index - 1 + items.length) % items.length]);
         break;
@@ -67,14 +70,14 @@ export class MenuNavigator {
         break;
       case 'left':
       case 'right':
-        this.adjust(current, input.nav === 'right' ? 1 : -1, items);
+        this.adjust(current, nav === 'right' ? 1 : -1, items);
         break;
     }
 
-    if (input.confirmPressed) {
+    if (pads.some((i) => i.confirmPressed)) {
       if (current instanceof HTMLInputElement && (current.type === 'text' || !current.type)) current.focus();
       else current.click();
-    } else if (input.backPressed) {
+    } else if (pads.some((i) => i.backPressed)) {
       const back = (BACK_BUTTONS[screen.id] ?? []).map((id) => document.getElementById(id)).find((el) => el && visible(el));
       back?.click();
     }

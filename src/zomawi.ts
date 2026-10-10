@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Enemy, propMaterial, type EnemyState, type EnemyStats, type StrikeOutcome } from './enemy';
 import type { Humanoid } from './character';
 import type { GameContext, Target } from './types';
+import type { Player } from './player';
 import { addCape } from './vampires';
 import { Shockwave } from './zombieKing';
 import { FORTRESS } from './layout';
@@ -76,6 +77,8 @@ export class Zomawi extends Enemy {
   private readonly lungeDir = new THREE.Vector3();
   private readonly chargeHits = new Set<Target>();
   private grabTick = 0;
+  /** The hero in its grip. */
+  private held: Player | null = null;
   private hoverAngle = 0;
   private rainCd = 0;
   private orbCd = 0;
@@ -349,7 +352,7 @@ export class Zomawi extends Enemy {
         this.startLunge('charge', dx, dz, dist);
         return;
       }
-      if (dist > 3 && dist < 7 && t === ctx.player && this.biteCd <= 0) {
+      if (dist > 3 && dist < 7 && (ctx.players as Target[]).includes(t!) && this.biteCd <= 0) {
         this.biteCd = 12 - this.stage * 2;
         this.startLunge('bite', dx, dz, dist);
         return;
@@ -404,7 +407,7 @@ export class Zomawi extends Enemy {
     this.faceYaw = Math.atan2(this.lungeDir.x, this.lungeDir.z);
     if (charge) {
       // The general's charge: anyone in the path is cut down.
-      for (const h of [ctx.player as Target, ...ctx.allies]) {
+      for (const h of [...ctx.players, ...ctx.allies]) {
         if (!h.alive || this.chargeHits.has(h)) continue;
         if (Math.hypot(h.pos.x - this.pos.x, h.pos.z - this.pos.z) < 1.8 + h.radius) {
           this.chargeHits.add(h);
@@ -413,9 +416,10 @@ export class Zomawi extends Enemy {
       }
     } else {
       // The zombie's bite: seize the hero and feed.
-      const player = ctx.player;
-      if (player.alive && !player.invulnerable && Math.hypot(player.pos.x - this.pos.x, player.pos.z - this.pos.z) < 1.7) {
-        player.startGrab();
+      const caught = ctx.players.find((h) => h.alive && !h.invulnerable && Math.hypot(h.pos.x - this.pos.x, h.pos.z - this.pos.z) < 1.7);
+      if (caught) {
+        this.held = caught;
+        caught.startGrab();
         this.grabTick = 0.2;
         this.vel.set(0, 0, 0);
         this.setState('grab');
@@ -429,7 +433,7 @@ export class Zomawi extends Enemy {
   }
 
   private thinkGrab(dt: number, ctx: GameContext) {
-    const player = ctx.player;
+    const player = this.held ?? ctx.player;
     const fx = Math.sin(this.yaw);
     const fz = Math.cos(this.yaw);
     player.holdAt(this.pos.x + fx * 1.4, this.pos.z + fz * 1.4);

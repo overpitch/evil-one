@@ -3,6 +3,8 @@ import { WORLD_HALF } from './world';
 
 export interface MapData {
   player: { x: number; z: number; yaw: number };
+  /** Player 2's hero (two-player), drawn in blue. */
+  player2: { x: number; z: number; yaw: number } | null;
   heroLevel: number;
   allies: { x: number; z: number }[];
   outposts: { x: number; z: number; name: string; captured: boolean }[];
@@ -117,22 +119,25 @@ export function drawMap(canvas: HTMLCanvasElement, data: MapData) {
     g.fill();
   }
 
-  // The hero: an arrow pointing the way they face.
-  const { x, z, yaw } = data.player;
-  g.save();
-  g.translate(sx(x), sy(z));
-  g.rotate(-yaw);
-  const s = size / 45;
-  g.beginPath();
-  g.moveTo(0, -s);
-  g.lineTo(s * 0.65, s * 0.7);
-  g.lineTo(0, s * 0.35);
-  g.lineTo(-s * 0.65, s * 0.7);
-  g.closePath();
-  g.fillStyle = '#fff';
-  g.strokeStyle = '#000';
-  g.lineWidth = 2;
-  g.fill();
-  g.stroke();
-  g.restore();
+  // The heroes: arrows pointing the way they face (Player 2 in blue).
+  const arrow = (hero: { x: number; z: number; yaw: number }, color: string) => {
+    g.save();
+    g.translate(sx(hero.x), sy(hero.z));
+    g.rotate(-hero.yaw);
+    const s = size / 45;
+    g.beginPath();
+    g.moveTo(0, -s);
+    g.lineTo(s * 0.65, s * 0.7);
+    g.lineTo(0, s * 0.35);
+    g.lineTo(-s * 0.65, s * 0.7);
+    g.closePath();
+    g.fillStyle = color;
+    g.strokeStyle = '#000';
+    g.lineWidth = 2;
+    g.fill();
+    g.stroke();
+    g.restore();
+  };
+  if (data.player2) arrow(data.player2, '#7fb8ff');
+  arrow(data.player, '#fff');
 }

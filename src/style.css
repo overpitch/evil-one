@@ -959,3 +959,56 @@ button.weapon-card.locked {
   font: 11px/1.4 ui-monospace, Menlo, monospace;
   color: #6f6758;
 }
+
+/* One view per hero; two-player splits the screen down the middle. */
+.view {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+#hud.split #view1 {
+  right: 50%;
+}
+
+#hud.split .view2 {
+  left: 50%;
+}
+
+.view2 .hero-name {
+  color: #9cc4ff;
+}
+
+.split-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 4px;
+  margin-left: -2px;
+  background: #0d0b10;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+}
+
+/* Two-player: the shared objective sits just below the top, between the two views' status bars. */
+#hud.split .top-center {
+  top: 150px;
+  width: min(420px, 40vw);
+}
+
+.floaters {
+  position: absolute;
+  inset: 0;
+}
+
+.down-note {
+  position: absolute;
+  top: 42%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 22px;
+  letter-spacing: 2px;
+  color: #e9dcc0;
+  text-shadow: 0 2px 4px #000;
+}

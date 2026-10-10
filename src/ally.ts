@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid } from './character';
 import type { Enemy } from './enemy';
 import type { GameContext, HitResult, Target } from './types';
+import type { Player } from './player';
 import { heightAt, resolveColliders } from './world';
 import { clamp, dampAngle, easeOutCubic, lerp, smoothing, wrapAngle } from './util';
 import { sfx, volumeAt } from './audio';
@@ -15,6 +16,10 @@ type State = 'follow' | 'engage' | 'windup' | 'strike' | 'recover' | 'stagger' |
  */
 const SLOTS: [number, number][] = [[-2.2, 0.4], [2.6, 1], [-4, -1], [4.4, 0.2]];
 export const SQUAD_SIZE = SLOTS.length;
+/** With two players, each hero leads an army of this many. */
+export const ARMY_SIZE = 3;
+/** Shirt colors: Player 1's army in red, Player 2's in blue. */
+const ARMY_SHIRTS = [0x8a2a2a, 0x2a4a8a];
 
 const MAX_HP = 70;
 const ENGAGE_RANGE = 14; // from the soldier
@@ -45,10 +50,18 @@ export class Ally implements Target {
   private sinceHurt = 99;
   private readonly desired = new THREE.Vector3();
 
-  constructor(scene: THREE.Scene, private readonly slot: number) {
+  /** The hero this soldier follows (falls back to the other hero while theirs is down). */
+  hero: Player | null = null;
+
+  constructor(
+    scene: THREE.Scene,
+    private readonly slot: number,
+    /** 0: Player 1's army, 1: Player 2's. */
+    readonly army: 0 | 1 = 0,
+  ) {
     this.h = createHumanoid({
-      skin: SKINS[slot % SKINS.length],
-      shirt: 0x8a2a2a,
+      skin: SKINS[(slot + army * 2) % SKINS.length],
+      shirt: ARMY_SHIRTS[army],
       pants: 0x3a3f4a,
       boots: 0x3b2a1e,
       eyes: 0x222222,
@@ -64,12 +77,24 @@ export class Ally implements Target {
     return this.state !== 'dead' && this.state !== 'gone';
   }
 
-  /** Brings the soldier (back) into the fight at full health. */
+  /** Sends the soldier away (not part of the current armies). */
+  dismiss() {
+    this.state = 'gone';
+    this.target = null;
+    this.h.root.visible = false;
+  }
+
+  /** The hero to follow right now. */
+  private leaderOf(ctx: GameContext) {
+    return this.hero?.alive ? this.hero : ctx.leader;
+  }
+
   /** Patches a living soldier back up to full health. */
   heal() {
     if (this.alive) this.hp = MAX_HP;
   }
 
+  /** Brings the soldier (back) into the fight at full health. */
   reinforce(x: number, z: number) {
     this.pos.set(x, heightAt(x, z), z);
     this.vel.set(0, 0, 0);
@@ -83,7 +108,7 @@ export class Ally implements Target {
 
   /** Where this soldier stands in formation behind the hero. */
   slotPosition(ctx: GameContext, out: THREE.Vector3) {
-    const p = ctx.player;
+    const p = this.leaderOf(ctx);
     const [right, forward] = SLOTS[this.slot];
     const fx = Math.sin(p.yaw);
     const fz = Math.cos(p.yaw);
@@ -93,7 +118,7 @@ export class Ally implements Target {
   update(dt: number, ctx: GameContext) {
     if (this.state === 'gone') return;
     this.stateTime += dt;
-    const player = ctx.player;
+    const player = this.leaderOf(ctx);
 
     // Catch up if left far behind (e.g. the hero respawned).
     if (this.alive && this.pos.distanceTo(player.pos) > 55) {
@@ -228,7 +253,7 @@ export class Ally implements Target {
     let bestDist = ENGAGE_RANGE;
     for (const z of ctx.enemies) {
       if (!z.alive || z.state === 'rising' || z.flying || !z.fightActive) continue;
-      if (z.pos.distanceTo(ctx.player.pos) > LEASH) continue;
+      if (z.pos.distanceTo(this.leaderOf(ctx).pos) > LEASH) continue;
       const d = z.pos.distanceTo(this.pos);
       if (d < bestDist) {
         bestDist = d;

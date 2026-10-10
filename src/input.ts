@@ -60,6 +60,13 @@ export class Input {
   private readonly pressed = new Set<string>();
   private clicked = false;
 
+  /** Player 2 reads only this controller (null: any controller, as Player 1 does). */
+  padIndex: number | null = null;
+  /** Controller Player 1 leaves alone (Player 2's), or null. */
+  exclude: number | null = null;
+  /** The controller that last gave this player input, or null if none has. */
+  lastPadIndex: number | null = null;
+
   private pad: Gamepad | null = null;
   private padDown = new Set<number>();
   private readonly padPressed = new Set<number>();
@@ -68,7 +75,15 @@ export class Input {
   private navTimer = 0;
   private navFired: NavDir | null = null;
 
-  constructor(private readonly el: HTMLElement) {
+  /** `keyboard: false` makes a controller-only player (Player 2), with no keyboard or mouse. */
+  constructor(
+    private readonly el: HTMLElement,
+    keyboard = true,
+  ) {
+    if (!keyboard) {
+      this.mode = 'gamepad';
+      return;
+    }
     window.addEventListener('keydown', (e) => {
       // Let text fields (hero name) receive every key.
       if (e.target instanceof HTMLInputElement && e.target.type === 'text') return;
@@ -118,27 +133,45 @@ export class Input {
     }
   }
 
-  /** Reads the controller. Call once at the start of every frame. */
+  /** Reads the controller(s). Call once at the start of every frame. */
   poll(dt: number) {
-    const pads = navigator.getGamepads?.() ?? [];
-    this.pad = null;
-    for (const p of pads) {
-      if (p?.connected) {
-        this.pad = p;
-        break;
-      }
+    const all = navigator.getGamepads?.() ?? [];
+    // Player 2 uses their own controller. Player 1 uses every other one, so
+    // it doesn't matter which controller they pick up.
+    const pads: Gamepad[] = [];
+    for (const p of all) {
+      if (!p?.connected) continue;
+      if (this.padIndex !== null ? p.index === this.padIndex : p.index !== this.exclude) pads.push(p);
     }
     const previous = this.padDown;
     this.padDown = new Set();
     this.padPressed.clear();
     this.axes = [0, 0, 0, 0];
-    const pad = this.pad;
-    if (!pad) return;
-    pad.buttons.forEach((b, i) => {
-      if (b.pressed || b.value > 0.5) this.padDown.add(i);
-    });
+    this.pad = pads.find((p) => p.index === this.lastPadIndex) ?? pads[0] ?? null;
+    if (!this.pad) {
+      this.navHeld = null;
+      this.navFired = null;
+      return;
+    }
+    for (const pad of pads) {
+      let used = false;
+      pad.buttons.forEach((b, i) => {
+        if (b.pressed || b.value > 0.5) {
+          this.padDown.add(i);
+          used = true;
+        }
+      });
+      for (let i = 0; i < 4; i++) {
+        const v = deadzone(pad.axes[i] ?? 0);
+        if (Math.abs(v) > Math.abs(this.axes[i])) this.axes[i] = v;
+        if (Math.abs(v) > 0.3) used = true;
+      }
+      if (used) {
+        this.lastPadIndex = pad.index;
+        this.pad = pad;
+      }
+    }
     for (const i of this.padDown) if (!previous.has(i)) this.padPressed.add(i);
-    this.axes = [0, 1, 2, 3].map((i) => deadzone(pad.axes[i] ?? 0));
     // While a browser is steering a cursor with the controller (Edge on Xbox in browser
     // mode), the buttons belong to the browser: don't switch the menus to controller mode.
     if ((this.padPressed.size > 0 || this.axes.some((a) => Math.abs(a) > 0.3)) && !this.cursorActive) {

@@ -3,6 +3,7 @@ import type { EnemyState, EnemyStats, StrikeOutcome } from './enemy';
 import type { Humanoid } from './character';
 import { VampireKnight, vampireLook } from './vampires';
 import type { GameContext, Target } from './types';
+import type { Player } from './player';
 import { VAMPIRE_LAND } from './layout';
 import { XP_REWARD } from './progression';
 import { lerp } from './util';
@@ -46,6 +47,8 @@ export class VampireLord extends VampireKnight {
   private circleDir = 1;
   private lungeCooldown = 6;
   private grabTick = 0;
+  /** The hero in his grip. */
+  private held: Player | null = null;
   private batsAt: number[] = [];
   private readonly batTarget = new THREE.Vector3();
   private readonly lungeDir = new THREE.Vector3();
@@ -105,7 +108,6 @@ export class VampireLord extends VampireKnight {
       return;
     }
     this.lungeCooldown -= dt;
-    const player = ctx.player;
 
     switch (this.state) {
       case 'bats':
@@ -126,7 +128,7 @@ export class VampireLord extends VampireKnight {
     }
     if (this.state === 'chase') {
       this.combo = 0;
-      if (this.lungeCooldown <= 0 && this.target === player && dist > 3 && dist < 8) {
+      if (this.lungeCooldown <= 0 && (ctx.players as Target[]).includes(this.target!) && dist > 3 && dist < 8) {
         this.lungeDir.set(dx / dist, 0, dz / dist);
         sfx.hiss(1);
         this.setState('lunge');
@@ -163,7 +165,6 @@ export class VampireLord extends VampireKnight {
   }
 
   private thinkLunge(ctx: GameContext, dx: number, dz: number) {
-    const player = ctx.player;
     if (this.stateTime < LUNGE_WINDUP) {
       this.faceYaw = Math.atan2(dx, dz);
       this.turnRate = 8;
@@ -174,9 +175,10 @@ export class VampireLord extends VampireKnight {
     this.accel = 40;
     this.desired.copy(this.lungeDir).multiplyScalar(15);
     this.faceYaw = Math.atan2(this.lungeDir.x, this.lungeDir.z);
-    const reach = Math.hypot(player.pos.x - this.pos.x, player.pos.z - this.pos.z);
-    if (player.alive && !player.invulnerable && reach < 1.6) {
-      player.startGrab();
+    const caught = ctx.players.find((h) => h.alive && !h.invulnerable && Math.hypot(h.pos.x - this.pos.x, h.pos.z - this.pos.z) < 1.6);
+    if (caught) {
+      this.held = caught;
+      caught.startGrab();
       this.grabTick = 0.2;
       this.vel.set(0, 0, 0);
       this.setState('grab');
@@ -190,7 +192,7 @@ export class VampireLord extends VampireKnight {
   }
 
   private thinkGrab(dt: number, ctx: GameContext) {
-    const player = ctx.player;
+    const player = this.held ?? ctx.player;
     const fx = Math.sin(this.yaw);
     const fz = Math.cos(this.yaw);
     player.holdAt(this.pos.x + fx * 1.25, this.pos.z + fz * 1.25);
@@ -214,7 +216,7 @@ export class VampireLord extends VampireKnight {
   private startBats(ctx: GameContext) {
     ctx.particles.burst(new THREE.Vector3(this.pos.x, this.pos.y + 1.5, this.pos.z), 0x1a1018, 26, 4);
     sfx.bats(1);
-    const player = ctx.player;
+    const player = ctx.leader;
     let best = 0;
     for (let i = 0; i < 8; i++) {
       const a = Math.random() * Math.PI * 2;

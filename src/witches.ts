@@ -170,7 +170,7 @@ export class Hexer extends Enemy {
     const at = new THREE.Vector3(this.pos.x, this.pos.y + 0.6, this.pos.z);
     ctx.particles.burst(at, 0xb04aff, 24, 7);
     sfx.cast(volumeAt(this.pos.distanceTo(ctx.player.pos)));
-    for (const h of [ctx.player as Target, ...ctx.allies]) {
+    for (const h of [...ctx.players, ...ctx.allies]) {
       if (h.alive && Math.hypot(h.pos.x - this.pos.x, h.pos.z - this.pos.z) < BURST_RADIUS * this.stats.scale) {
         h.takeDamage(Math.round(this.stats.damage * 0.8), this.pos, ctx);
       }
@@ -334,7 +334,7 @@ export class BroomWitch extends Enemy {
         this.faceYaw = this.yaw;
         this.airY = k < 0.5 ? lerp(CRUISE_HEIGHT, LOW_HEIGHT - 0.3, easeInOutQuad(k * 2)) : lerp(LOW_HEIGHT - 0.3, LOW_HEIGHT, (k - 0.5) * 2);
         if (this.airY < 1.6) {
-          for (const h of [ctx.player as Target, ...ctx.allies]) {
+          for (const h of [...ctx.players, ...ctx.allies]) {
             if (!h.alive || this.swoopHits.has(h)) continue;
             if (Math.hypot(h.pos.x - this.pos.x, h.pos.z - this.pos.z) < 1.3 + h.radius) {
               this.swoopHits.add(h);

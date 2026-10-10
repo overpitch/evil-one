@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid } from './character';
+import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid, type HumanoidLook } from './character';
 import type { Input } from './input';
 import type { GameContext, HitResult, Target } from './types';
 import { heightAt, resolveColliders } from './world';
@@ -60,7 +60,7 @@ const MAX_GRAB = 2.5;
 const ROLL_STAMINA = 22;
 const ARM_REST: [number, number] = [0, -0.35];
 
-const PLAYER_LOOK = {
+const PLAYER_LOOK: HumanoidLook = {
   skin: 0xe0b48a,
   shirt: 0xa3262a,
   pants: 0x3a3f4a,
@@ -70,6 +70,9 @@ const PLAYER_LOOK = {
   armor: 0xb8c0c8,
   plume: 0xd23a2a,
 };
+
+/** Player 2 wears blue, to tell the heroes apart. */
+const PLAYER2_LOOK: HumanoidLook = { ...PLAYER_LOOK, shirt: 0x2a4fa3, plume: 0x3a8ae0 };
 
 const HURT_COLOR = new THREE.Color(0xff2020);
 const SLOW_COLOR = new THREE.Color(0x9a4aff);
@@ -124,6 +127,8 @@ export class Player implements Target {
   private lastStep = 0;
   /** Called on each footfall with a volume (0..1). */
   onStep?: (volume: number) => void;
+  /** Called after a teleport (the camera snaps instead of sweeping across the map). */
+  onTeleport?: () => void;
   /** Called when the hero is hurt (controller rumble). */
   onHurt?: (amount: number) => void;
   // Presses are remembered briefly so a click during a stagger or swing isn't lost.
@@ -135,8 +140,8 @@ export class Player implements Target {
   private readonly target = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
 
-  constructor(scene: THREE.Scene) {
-    this.h = createHumanoid(PLAYER_LOOK);
+  constructor(scene: THREE.Scene, second = false) {
+    this.h = createHumanoid(second ? PLAYER2_LOOK : PLAYER_LOOK);
     scene.add(this.h.root);
     // Weapons hang from the right fist; the business end points along the hand group's +Z.
     const hand = new THREE.Group();
@@ -217,6 +222,14 @@ export class Player implements Target {
     this.maxHp = stats.maxHp;
     this.maxStamina = stats.maxStamina;
     this.damageMultiplier = stats.damageMultiplier;
+  }
+
+  /** Moves the hero to (x, z) without healing (pulled into a boss arena beside the other hero). */
+  teleport(x: number, z: number, yaw = this.yaw) {
+    this.pos.set(x, heightAt(x, z), z);
+    this.vel.set(0, 0, 0);
+    this.yaw = yaw;
+    this.onTeleport?.();
   }
 
   /** Full health and stamina, standing at (x, z). */
@@ -491,7 +504,7 @@ export class Player implements Target {
       const spread = sw.heavy ? [-0.22, 0, 0.22] : [0];
       for (const a of spread) {
         const dir = new THREE.Vector3(Math.sin(this.yaw + a), 0, Math.cos(this.yaw + a));
-        ctx.projectiles.fireFriendly(from, dir, damage);
+        ctx.projectiles.fireFriendly(from, dir, damage, this);
       }
       sfx.cast(0.7);
     }

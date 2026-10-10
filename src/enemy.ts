@@ -288,7 +288,7 @@ export abstract class Enemy {
         best = c;
       }
     };
-    consider(ctx.player, 0.8);
+    for (const p of ctx.players) consider(p, 0.8);
     for (const a of ctx.allies) consider(a, 1);
     this.target = best;
   }
@@ -413,13 +413,13 @@ export abstract class Enemy {
 
   takeHit(damage: number, dir: THREE.Vector3, knockback: number, heavy: boolean, ctx: GameContext, attacker: Target): StrikeOutcome {
     if (!this.alive || this.flying) return 'ignored';
+    const byPlayer = (ctx.players as Target[]).includes(attacker);
     if (this.tryParry(attacker, ctx)) {
-      sfx.block(attacker === ctx.player ? 1 : volumeAt(this.pos.distanceTo(ctx.player.pos)) * 0.6);
+      sfx.block(byPlayer ? 1 : volumeAt(this.pos.distanceTo(ctx.player.pos)) * 0.6);
       ctx.particles.burst(new THREE.Vector3(this.pos.x - dir.x * 0.6, this.pos.y + 1.4 * this.stats.scale, this.pos.z - dir.z * 0.6), 0xffd36b, 10, 4);
       return 'parried';
     }
     damage = Math.max(1, Math.round((damage * this.damageTakenMultiplier()) / ctx.difficulty.enemyHealth));
-    const byPlayer = attacker === ctx.player;
     this.hp = Math.max(0, this.hp - damage);
     this.hitFlash = 1;
     this.poiseDamage += damage;

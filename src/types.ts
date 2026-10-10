@@ -23,7 +23,12 @@ export interface Target {
 export interface GameContext {
   scene: THREE.Scene;
   colliders: Colliders;
+  /** Player 1's hero (also where sounds are heard from). */
   player: Player;
+  /** Every hero in the game: Player 1, and Player 2 when they've joined. */
+  players: Player[];
+  /** The hero the soldiers follow: Player 1, or Player 2 while Player 1 is down. */
+  leader: Player;
   allies: Ally[];
   enemies: Enemy[];
   particles: Particles;

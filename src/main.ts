@@ -1,10 +1,10 @@
 import './style.css';
 import * as THREE from 'three';
-import { Input } from './input';
+import { Input, PAD } from './input';
 import { createWorld, respawnPoint, territoryWeight } from './world';
 import { Player } from './player';
 import type { Enemy } from './enemy';
-import { Ally, SQUAD_SIZE } from './ally';
+import { Ally, ARMY_SIZE, SQUAD_SIZE } from './ally';
 import { ThirdPersonCamera } from './camera';
 import { Hud } from './hud';
 import { Particles } from './particles';
@@ -45,21 +45,39 @@ document.getElementById('app')!.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 400);
+const camera2 = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 400);
+// Each view is rendered separately; the sun's shadows only need drawing once per frame.
+renderer.shadowMap.autoUpdate = false;
 const world = createWorld(scene);
 const particles = new Particles(scene);
 const projectiles = new Projectiles(scene);
 const drops = new WeaponDrops(scene);
 const player = new Player(scene);
+/** Player 2's hero, in blue. Only in the world while two people play. */
+const player2 = new Player(scene, true);
+player2.h.root.visible = false;
 const camCtrl = new ThirdPersonCamera(camera);
+const camCtrl2 = new ThirdPersonCamera(camera2);
 const input = new Input(renderer.domElement);
+/** Player 2 plays with a controller only. */
+const input2 = new Input(renderer.domElement, false);
 const hud = new Hud(settings);
-const floaters = new Floaters(hud.floaterLayer);
+const floaters = new Floaters(hud.views[0].floaterLayer);
+const floaters2 = new Floaters(hud.views[1].floaterLayer);
+/** Two people are playing, side by side. */
+let twoPlayer = false;
+/** "Add Player 2" was chosen: the next controller to press A joins. */
+let waitingForP2 = false;
+/** Seconds a fallen hero waits before coming back beside the other (two-player). */
+const REVIVE_TIME = 6;
 
 const music = new Music();
 
 function applySettings(s: Settings) {
-  camCtrl.sensitivity = s.sensitivity;
-  camCtrl.invertY = s.invertY;
+  for (const c of [camCtrl, camCtrl2]) {
+    c.sensitivity = s.sensitivity;
+    c.invertY = s.invertY;
+  }
   setVolumes(s.musicVolume, s.sfxVolume);
   // Low graphics: no real-time shadows, fewer pixels (fewer still on Xbox), fewer distant enemies.
   const low = s.graphics === 'low';
@@ -71,12 +89,22 @@ function applySettings(s: Settings) {
 applySettings(settings);
 player.onStep = (volume) => sfx.step(volume);
 player.onHurt = () => input.rumble(0.7, 180);
+player2.onStep = (volume) => sfx.step(volume * 0.7);
+player2.onHurt = () => input2.rumble(0.7, 180);
+player.onTeleport = () => camCtrl.cut();
+player2.onTeleport = () => camCtrl2.cut();
 const menuNav = new MenuNavigator();
 // Browsers only allow sound after the player interacts; start it on the first key or click.
 for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, () => initAudio(), { once: true });
 
 const enemies: Enemy[] = [];
-const allies = Array.from({ length: SQUAD_SIZE }, (_, i) => new Ally(scene, i));
+// Player 1's army (red) and Player 2's (blue). One player leads all of the red army;
+// with two players, each hero leads an army of three.
+const army1 = Array.from({ length: SQUAD_SIZE }, (_, i) => new Ally(scene, i, 0));
+const army2 = Array.from({ length: ARMY_SIZE }, (_, i) => new Ally(scene, i, 1));
+for (const a of army1) a.hero = player;
+for (const a of army2) a.hero = player2;
+const allies = [...army1, ...army2];
 
 /** 'menu' covers the title, naming and intro screens; the world idles behind them. */
 let phase: 'menu' | 'playing' = 'menu';
@@ -95,6 +123,8 @@ const ctx: GameContext = {
   scene,
   colliders: world.colliders,
   player,
+  players: [player],
+  leader: player,
   allies,
   enemies,
   particles,
@@ -102,16 +132,20 @@ const ctx: GameContext = {
   difficulty: DIFFICULTIES[settings.difficulty],
   peaceful: true,
   arenaLock: null,
-  floatText: (at, text, kind) => floaters.spawn(at, text, kind),
-  addShake: (amount) => camCtrl.addShake(amount),
+  floatText: (at, text, kind) => floatText(at, text, kind),
+  addShake: (amount) => {
+    camCtrl.addShake(amount);
+    if (twoPlayer) camCtrl2.addShake(amount);
+  },
   hitStop: (seconds) => {
     input.rumble(seconds > 0.08 ? 0.5 : 0.3, 90);
+    if (twoPlayer) input2.rumble(seconds > 0.08 ? 0.5 : 0.3, 90);
     hitStopTimer = Math.max(hitStopTimer, seconds);
   },
   onEnemyKilled: (z) => {
     if (z.xpReward === 0) return; // the Witch Queen's mirror images don't count
     kills++;
-    floaters.spawn(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP`, 'xp');
+    floatText(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP`, 'xp');
     awardXp(z.xpReward);
   },
   summonMinions: (around, count) => campaign.summonMinions(around, count, ctx),
@@ -121,8 +155,11 @@ const campaign = new Campaign(scene, world, enemies, {
   announce: (title, detail) => hud.announce(title, detail),
   say: (speaker, line) => hud.say(speaker, line),
   checkpointReached: () => {
-    player.hp = player.maxHp;
-    player.stamina = player.maxStamina;
+    for (const h of ctx.players) {
+      if (!h.alive) continue;
+      h.hp = h.maxHp;
+      h.stamina = h.maxStamina;
+    }
     reinforceSquad();
     saveGame();
   },
@@ -133,7 +170,7 @@ const campaign = new Campaign(scene, world, enemies, {
     hud.announce(t.def.name, `${status} · Reinforcements have joined you`);
   },
   awardXp: (amount, at) => {
-    floaters.spawn(at, `+${amount} XP`, 'xp');
+    floatText(at, `+${amount} XP`, 'xp');
     awardXp(amount);
   },
   bossStarted: (name) => hud.showBoss(name),
@@ -149,15 +186,34 @@ const campaign = new Campaign(scene, world, enemies, {
   save: () => saveGame(),
 });
 
+/** Damage numbers and +XP show in both views. */
+function floatText(at: THREE.Vector3, text: string, kind: Parameters<Floaters['spawn']>[2]) {
+  floaters.spawn(at, text, kind);
+  if (twoPlayer) floaters2.spawn(at, text, kind);
+}
+
+/** XP and levels are shared: Player 2 always matches Player 1. */
 function awardXp(amount: number) {
-  if (player.gainXp(amount) > 0) {
-    const at = new THREE.Vector3(player.pos.x, player.pos.y + 1, player.pos.z);
-    particles.burst(at, 0xffd36b, 30, 6);
-    particles.burst(at, 0xfff2b0, 15, 4);
-    camCtrl.addShake(0.2);
+  const gained = player.gainXp(amount) > 0;
+  syncPlayer2();
+  if (gained) {
+    for (const h of ctx.players) {
+      const at = new THREE.Vector3(h.pos.x, h.pos.y + 1, h.pos.z);
+      particles.burst(at, 0xffd36b, 30, 6);
+      particles.burst(at, 0xfff2b0, 15, 4);
+      if (h.alive) {
+        h.hp = h.maxHp;
+        h.stamina = h.maxStamina;
+      }
+    }
+    ctx.addShake(0.2);
     sfx.levelUp();
     hud.showLevelUp(player.level);
   }
+}
+
+function syncPlayer2() {
+  if (player2.level !== player.level || player2.xp !== player.xp) player2.loadHero(player2.name, player.level, player.xp);
 }
 
 function saveGame() {
@@ -201,31 +257,43 @@ function loadWeapons(save: SaveData | null) {
   }
 }
 
-function equip(w: WeaponDef, announce: boolean) {
-  if (!owned.has(w.id) || player.weapon === w) return;
-  player.setWeapon(w.id);
-  sfx.block(0.5);
-  saveWeapons();
-  if (announce) hud.announce(w.name, 'Equipped');
-  if (hud.inventoryOpen) hud.renderInventory(owned, player.weapon.id, input.mode === 'gamepad');
+/** Whose weapon the open inventory is choosing. */
+let inventoryFor: Player = player;
+
+const inputOf = (h: Player) => (h === player2 ? input2 : input);
+
+function renderInventory() {
+  const chooser = twoPlayer ? inventoryFor.name : undefined;
+  hud.renderInventory(owned, inventoryFor.weapon.id, inputOf(inventoryFor).mode === 'gamepad', chooser);
 }
 
-/** Walked into a fallen leader's weapon: it's yours, and in your hand. */
-function claimWeapon(w: WeaponDef) {
+function equip(w: WeaponDef, announce: boolean, hero: Player = player) {
+  if (!owned.has(w.id) || hero.weapon === w) return;
+  hero.setWeapon(w.id);
+  sfx.block(0.5);
+  if (hero === player) saveWeapons();
+  if (announce) hud.announce(w.name, twoPlayer ? `${hero.name} equipped it` : 'Equipped');
+  if (hud.inventoryOpen) renderInventory();
+}
+
+/** Walked into a fallen leader's weapon: it's yours (both heroes'), and in the finder's hand. */
+function claimWeapon(w: WeaponDef, hero: Player) {
   owned.add(w.id);
-  player.setWeapon(w.id);
+  hero.setWeapon(w.id);
   saveWeapons();
   sfx.levelUp();
-  camCtrl.addShake(0.2);
-  const how = input.mode === 'gamepad' ? 'Press Y' : 'Press I';
-  hud.announce(`New weapon: ${w.name}`, `${how} to open your inventory and switch weapons`, true);
+  ctx.addShake(0.2);
+  const how = inputOf(hero).mode === 'gamepad' ? 'Press Y' : 'Press I';
+  const who = twoPlayer ? `${hero.name} found it · ` : '';
+  hud.announce(`New weapon: ${w.name}`, `${who}${how} to open the inventory and switch weapons`, true);
 }
 
-function openInventory() {
-  if (phase !== 'playing' || !player.alive || endingShown) return;
+function openInventory(hero: Player = player) {
+  if (phase !== 'playing' || !hero.alive || endingShown) return;
+  inventoryFor = hero;
   hud.showMap(false);
   hud.showPause(false);
-  hud.renderInventory(owned, player.weapon.id, input.mode === 'gamepad');
+  renderInventory();
   hud.showInventory(true);
   if (document.pointerLockElement) document.exitPointerLock();
 }
@@ -235,10 +303,20 @@ function closeInventory() {
   lockPointer();
 }
 
-/** Fallen soldiers are replaced by fresh ones in formation behind the hero. */
+/** One player leads the whole red army; two players lead three soldiers each. */
+function inService(a: Ally) {
+  if (a.army === 1) return twoPlayer;
+  return !twoPlayer || army1.indexOf(a) < ARMY_SIZE;
+}
+
+/** Fallen soldiers are replaced by fresh ones in formation behind their hero. */
 function reinforceSquad(everyone = false) {
   const slot = new THREE.Vector3();
   for (const a of allies) {
+    if (!inService(a)) {
+      if (a.state !== 'gone') a.dismiss();
+      continue;
+    }
     if (everyone || !a.alive) {
       a.slotPosition(ctx, slot);
       a.reinforce(slot.x, slot.z);
@@ -258,11 +336,19 @@ function enterWorld(save: SaveData) {
   campaign.load(save);
   const spot = respawnPoint(campaign.current.banner);
   player.reset(spot.x, spot.z);
+  if (twoPlayer) {
+    syncPlayer2();
+    if (!owned.has(player2.weapon.id)) player2.setWeapon(STARTING_WEAPON);
+    player2.reset(spot.x - 1.6, spot.z);
+  }
   reinforceSquad(true);
-  camCtrl.yaw = 0;
-  camCtrl.pitch = 0.12;
-  camCtrl.cut();
+  for (const c of [camCtrl, camCtrl2]) {
+    c.yaw = 0;
+    c.pitch = 0.12;
+    c.cut();
+  }
   floaters.clear();
+  floaters2.clear();
   projectiles.clear();
   ctx.arenaLock = null;
   hitStopTimer = 0;
@@ -275,16 +361,17 @@ function enterWorld(save: SaveData) {
 }
 
 const mass = (b: Player | Ally | Enemy) => {
-  if (b === player) return 3;
+  if (b instanceof Player) return 3;
   if ('isBoss' in b) return b.isBoss ? 12 : b.radius > 0.5 ? 2.5 : 1;
   return 1;
 };
 
 /** Keeps bodies from overlapping; heavier bodies get pushed less. */
 function separateBodies() {
-  const bodies: (Player | Ally | Enemy)[] = [player];
+  const bodies: (Player | Ally | Enemy)[] = [...ctx.players];
   for (const a of allies) if (a.alive) bodies.push(a);
-  for (const e of enemies) if (e.alive && !e.flying && e.pos.distanceToSquared(player.pos) < 40 * 40) bodies.push(e);
+  const near = (e: Enemy) => ctx.players.some((h) => e.pos.distanceToSquared(h.pos) < 40 * 40);
+  for (const e of enemies) if (e.alive && !e.flying && near(e)) bodies.push(e);
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i];
@@ -309,7 +396,7 @@ function separateBodies() {
 function updateEnemies(dt: number) {
   for (const z of enemies) {
     if (z.state === 'dormant') continue;
-    const near = Math.abs(z.pos.x - player.pos.x) < activeRange && Math.abs(z.pos.z - player.pos.z) < activeRange;
+    const near = ctx.players.some((h) => Math.abs(z.pos.x - h.pos.x) < activeRange && Math.abs(z.pos.z - h.pos.z) < activeRange);
     if (near) z.update(dt, ctx);
     else z.sleep(dt);
   }
@@ -318,6 +405,7 @@ function updateEnemies(dt: number) {
 function mapData(objective: Objective): MapData {
   return {
     player: { x: player.pos.x, z: player.pos.z, yaw: player.yaw },
+    player2: twoPlayer ? { x: player2.pos.x, z: player2.pos.z, yaw: player2.yaw } : null,
     heroLevel: player.level,
     allies: allies.filter((a) => a.alive).map((a) => ({ x: a.pos.x, z: a.pos.z })),
     outposts: campaign.territories
@@ -334,6 +422,111 @@ function mapData(objective: Objective): MapData {
   };
 }
 
+// ---------- Two players ----------
+
+/** Player 2 joins on controller `padIndex`, beside Player 1, with their own army of three. */
+function joinPlayer2(padIndex: number) {
+  twoPlayer = true;
+  waitingForP2 = false;
+  input2.padIndex = padIndex;
+  input2.lastPadIndex = padIndex;
+  input.exclude = padIndex;
+  if (input.lastPadIndex === padIndex) input.lastPadIndex = null;
+  ctx.players = [player, player2];
+  player2.loadHero('Player 2', player.level, player.xp);
+  player2.setWeapon(player.weapon.id);
+  // Appear at Player 1's left (the camera looks over the right shoulder).
+  const side = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw)).multiplyScalar(1.6);
+  player2.reset(player.pos.x + side.x, player.pos.z + side.z);
+  player2.yaw = player.yaw;
+  player2.h.root.visible = true;
+  camCtrl2.yaw = camCtrl.yaw;
+  camCtrl2.pitch = camCtrl.pitch;
+  camCtrl2.cut();
+  hud.setSplit(true);
+  updateAspect();
+  reinforceSquad();
+  sfx.warHorn();
+  hud.announce('Player 2 has joined!', 'Each hero leads an army of three · Menu · Remove Player 2');
+}
+
+function leavePlayer2() {
+  if (!twoPlayer) return;
+  twoPlayer = false;
+  waitingForP2 = false;
+  input.exclude = null;
+  input2.padIndex = null;
+  ctx.players = [player];
+  ctx.leader = player;
+  player2.h.root.visible = false;
+  floaters2.clear();
+  hud.setSplit(false);
+  updateAspect();
+  // Player 1's army is back to full strength.
+  reinforceSquad();
+  hud.announce('Player 2 has left', 'Your army is back to full strength');
+}
+
+/** Each controller's A button last frame, to catch a fresh press. */
+const padA = new Map<number, boolean>();
+
+/**
+ * A second controller pressing A brings in Player 2: any time, if Player 1
+ * is already on a controller, or after "Add Player 2" (so a keyboard player
+ * can be joined by someone with a controller).
+ */
+function checkJoin() {
+  const pads = navigator.getGamepads?.() ?? [];
+  for (const p of pads) {
+    if (!p?.connected) continue;
+    const down = !!(p.buttons[PAD.A]?.pressed || (p.buttons[PAD.A]?.value ?? 0) > 0.5);
+    const fresh = down && !padA.get(p.index);
+    padA.set(p.index, down);
+    if (!fresh || twoPlayer || phase !== 'playing' || endingShown || menuNav.menuOpen) continue;
+    const p1Pad = input.lastPadIndex;
+    const p1OnKeyboard = input.mode === 'mouse' || p1Pad === null;
+    if ((waitingForP2 && (p1OnKeyboard || p.index !== p1Pad)) || (p1Pad !== null && input.mode === 'gamepad' && p.index !== p1Pad)) {
+      joinPlayer2(p.index);
+      return;
+    }
+  }
+}
+
+/** A fallen hero comes back beside the other one after a few seconds (two-player). */
+function revivingIn(h: Player): number | null {
+  if (!twoPlayer || h.alive) return null;
+  const other = h === player ? player2 : player;
+  return other.alive ? REVIVE_TIME - h.stateTime : null;
+}
+
+function updateRevives() {
+  if (!twoPlayer) return;
+  for (const h of ctx.players) {
+    const left = revivingIn(h);
+    if (left === null || left > 0) continue;
+    const other = h === player ? player2 : player;
+    const yaw = other.yaw;
+    h.reset(other.pos.x - Math.cos(yaw) * 1.6, other.pos.z + Math.sin(yaw) * 1.6);
+    h.yaw = yaw;
+    (h === player ? camCtrl : camCtrl2).yaw = yaw;
+    (h === player ? camCtrl : camCtrl2).cut();
+    particles.burst(new THREE.Vector3(h.pos.x, h.pos.y + 1, h.pos.z), 0xffd36b, 24, 5);
+    sfx.checkpoint();
+    hud.announce(`${h.name} is back!`, '');
+  }
+  // The soldiers follow whichever hero is standing.
+  ctx.leader = player.alive || !player2.alive ? player : player2;
+}
+
+hud.onTogglePlayer2 = () => {
+  if (twoPlayer) leavePlayer2();
+  else {
+    waitingForP2 = true;
+    hud.announce('Player 2', 'Press A on the second controller to join');
+  }
+  lockPointer();
+};
+
 // ---------- Menu flow: title → (name → intro | continue) → play ----------
 
 /** Grabs the pointer. If the browser refuses, the pause screen offers a Resume button. */
@@ -349,7 +542,7 @@ function lockPointer() {
   input.requestLock();
   setTimeout(() => {
     const usingPad = input.mode === 'gamepad';
-    if (phase === 'playing' && !input.locked && !usingPad && player.alive && !hud.optionsOpen && !hud.inventoryOpen) hud.showPause(true);
+    if (phase === 'playing' && !input.locked && !usingPad && !twoPlayer && player.alive && !hud.optionsOpen && !hud.inventoryOpen) hud.showPause(true);
   }, 1200);
 }
 
@@ -377,9 +570,9 @@ hud.onBegin = () => {
   lockPointer();
 };
 hud.onResume = lockPointer;
-hud.onInventory = openInventory;
+hud.onInventory = () => openInventory(player);
 hud.onInventoryClose = closeInventory;
-hud.onEquip = (id) => equip(WEAPONS.find((w) => w.id === id)!, false);
+hud.onEquip = (id) => equip(WEAPONS.find((w) => w.id === id)!, false, inventoryFor);
 hud.onRespawn = () => {
   enterWorld(loadSave() ?? newSave(player.name));
   lockPointer();
@@ -391,7 +584,7 @@ hud.onSettings = (s) => {
 };
 input.onLockChange = (locked) => {
   if (!locked) hud.showMap(false);
-  if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !endingShown) hud.showPause(!locked && player.alive);
+  if (phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !endingShown) hud.showPause(!locked && ctx.players.some((h) => h.alive));
 };
 
 /** The war is won: release the mouse and roll the ending. */
@@ -412,10 +605,12 @@ function showEnding() {
 hud.onKeepExploring = () => {
   endingShown = false;
   hud.showScreen('none');
+  hud.announce('The lairs still stir', "Enemies keep rising in the four leaders' lairs");
   lockPointer();
 };
 /** Back to the title screen (progress since the last checkpoint is dropped; the save stays). */
 function returnToTitle() {
+  leavePlayer2();
   endingShown = false;
   phase = 'menu';
   ctx.peaceful = true;
@@ -439,10 +634,18 @@ function returnToTitle() {
 hud.onEndingTitle = returnToTitle;
 hud.onQuitToTitle = returnToTitle;
 
+/** Each camera fits its view: the whole screen, or half of it in two-player. */
+function updateAspect() {
+  const aspect = (window.innerWidth / (twoPlayer ? 2 : 1)) / window.innerHeight;
+  for (const c of [camera, camera2]) {
+    c.aspect = aspect;
+    c.updateProjectionMatrix();
+  }
+}
+
 window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  updateAspect();
 });
 
 // The world behind the title screen reflects the saved game.
@@ -482,13 +685,13 @@ function updateSound(dt: number) {
   const fight = campaign.activeFight;
   if (endingShown) theme = 'victory';
   else if (phase === 'menu') theme = 'title';
-  else if (!player.alive) theme = 'silence';
+  else if (!ctx.players.some((h) => h.alive)) theme = 'silence';
   else if (fight) {
     theme = 'boss';
     mood = fight.def.id;
   } else {
     const r2 = 28 * 28;
-    const engaged = enemies.some((e) => e.alive && e.target !== null && e.fightActive && e.pos.distanceToSquared(player.pos) < r2);
+    const engaged = enemies.some((e) => e.alive && e.target !== null && e.fightActive && ctx.players.some((h) => e.pos.distanceToSquared(h.pos) < r2));
     combatHold = engaged ? 7 : Math.max(0, combatHold - dt);
     theme = combatHold > 0 ? 'battle' : 'explore';
   }
@@ -504,11 +707,15 @@ function updateSound(dt: number) {
 
 /** Advances the game by one frame of `realDt` seconds. */
 function tick(realDt: number) {
+  checkJoin();
   input.poll(realDt);
+  if (twoPlayer) input2.poll(realDt);
+  const inputs = twoPlayer ? [input, input2] : [input];
   // Menu button closes the pause menu; the menus themselves are driven by the d-pad, A and B.
-  const resumed = input.mode === 'gamepad' && input.pausePressed && hud.pauseOpen;
+  const menuPressed = (input.mode === 'gamepad' && input.pausePressed) || (twoPlayer && input2.pausePressed);
+  const resumed = menuPressed && hud.pauseOpen;
   if (resumed) hud.showPause(false);
-  menuNav.update(input);
+  menuNav.update(inputs);
 
   if (phase === 'menu') {
     player.idle(realDt);
@@ -516,17 +723,19 @@ function tick(realDt: number) {
     updateMenuCamera(realDt);
   } else {
     // With a controller there's no mouse capture: play whenever no menu is open.
-    const padPlay = (input.mode === 'gamepad' || IS_XBOX) && !menuNav.menuOpen;
-    if (padPlay && input.pausePressed && !resumed) hud.showPause(true);
+    const padPlay = (input.mode === 'gamepad' || IS_XBOX || twoPlayer) && !menuNav.menuOpen;
+    if (padPlay && menuPressed && !resumed) hud.showPause(true);
     if (hud.inventoryOpen) {
-      // The game waits while the hero picks a weapon.
-      if (input.inventoryPressed || input.escapePressed) closeInventory();
+      // The game waits while a hero picks a weapon.
+      if (inputs.some((i) => i.inventoryPressed) || input.escapePressed) closeInventory();
     } else if ((input.locked || padPlay || testMode) && !endingShown) {
       playTime += realDt;
-      if (input.mapPressed) hud.showMap(!hud.mapOpen);
-      if (input.inventoryPressed && player.alive) openInventory();
+      if (inputs.some((i) => i.mapPressed)) hud.showMap(!hud.mapOpen);
+      if (input.inventoryPressed && player.alive) openInventory(player);
+      else if (twoPlayer && input2.inventoryPressed && player2.alive) openInventory(player2);
       updateWeaponSwap();
       camCtrl.applyInput(input, realDt);
+      if (twoPlayer) camCtrl2.applyInput(input2, realDt);
       let dt = realDt;
       // Hit-stop: freeze the action for a few frames when a blow lands.
       if (hitStopTimer > 0) {
@@ -534,71 +743,110 @@ function tick(realDt: number) {
         dt *= 0.06;
       }
       player.update(dt, ctx, input, camCtrl.yaw);
+      if (twoPlayer) player2.update(dt, ctx, input2, camCtrl2.yaw);
+      updateRevives();
       for (const a of allies) a.update(dt, ctx);
       updateEnemies(dt);
       separateBodies();
       campaign.update(dt, ctx);
       projectiles.update(dt, ctx);
-      const claimed = drops.update(dt, player.alive ? player.pos : null, particles);
-      if (claimed) claimWeapon(claimed);
+      const claimed = drops.update(dt, ctx.players.filter((h) => h.alive), particles);
+      if (claimed) claimWeapon(claimed.weapon, claimed.by);
       particles.update(dt);
       floaters.update(dt, camera);
+      if (twoPlayer) floaters2.update(dt, camera2);
     }
     camCtrl.update(realDt, player.pos);
     camera.updateMatrixWorld();
-    // Soldiers who wander right in front of the lens are hidden so they don't block the view.
-    for (const a of allies) {
-      if (a.state === 'gone') continue;
-      const dx = a.pos.x - camera.position.x;
-      const dy = a.pos.y + 1.2 - camera.position.y;
-      const dz = a.pos.z - camera.position.z;
-      a.h.root.visible = dx * dx + dy * dy + dz * dz > 1.6 * 1.6;
+    if (twoPlayer) {
+      camCtrl2.update(realDt, player2.pos);
+      camera2.updateMatrixWorld();
     }
 
-    if (!player.alive && player.stateTime > 1.6 && !deathShown) {
+    if (ctx.players.every((h) => !h.alive && h.stateTime > 1.6) && !deathShown) {
       deathShown = true;
       hud.showMap(false);
       if (document.pointerLockElement) document.exitPointerLock();
       hud.showDeath(true);
     }
 
-    const objective = weaponObjective() ?? campaign.objective(player.pos, player.level);
-    hud.setObjective(objective.text, objective.at, camera, player.pos);
+    const lead = ctx.leader;
+    const objective = weaponObjective() ?? campaign.objective(lead.pos, player.level);
+    hud.setObjective(objective.text);
+    hud.views[0].setMarker(objective.at, camera, player.pos);
+    if (twoPlayer) hud.views[1].setMarker(objective.at, camera2, player2.pos);
     const fight = campaign.activeFight;
     if (fight) hud.setBossHealth(fight.leader.healthFraction);
     if (hud.mapOpen) hud.drawMap(mapData(objective));
   }
 
-  world.update(player.pos, realDt, campaign.gloomAt(player.pos));
+  world.update(ctx.leader.pos, realDt, campaign.gloomAt(ctx.leader.pos));
   updateSound(realDt);
   updateXboxTip(realDt);
   // A live controller readout on the pause screen, for tracking down stuck sticks or keys.
-  if (hud.pauseOpen) hud.setPadDebug(input.debugText());
-  for (const z of enemies) z.updateBar(camera);
-  hud.update(player, kills);
-  hud.setWeapon(player.weapon);
-  input.endFrame();
+  if (hud.pauseOpen) hud.setPadDebug(input.debugText() + (twoPlayer ? ` · P2 ${input2.debugText()}` : ''));
+  hud.update(kills);
+  hud.views[0].update(player, revivingIn(player));
+  if (twoPlayer) hud.views[1].update(player2, revivingIn(player2));
+  for (const i of inputs) i.endFrame();
+}
+
+/** Draws the world: once full-screen, or twice side by side in two-player. */
+function render() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  renderer.shadowMap.needsUpdate = true;
+  if (!twoPlayer || phase !== 'playing') {
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, w, h);
+    prepareView(camera);
+    renderer.render(scene, camera);
+    return;
+  }
+  const half = Math.floor(w / 2);
+  renderer.setScissorTest(true);
+  [camera, camera2].forEach((cam, i) => {
+    renderer.setViewport(i * half, 0, half, h);
+    renderer.setScissor(i * half, 0, half, h);
+    prepareView(cam);
+    renderer.render(scene, cam);
+  });
+  renderer.setScissorTest(false);
+}
+
+/** Health bars face this camera, and soldiers right in front of its lens are hidden so they don't block the view. */
+function prepareView(cam: THREE.Camera) {
+  for (const z of enemies) z.updateBar(cam);
+  for (const a of allies) {
+    if (a.state === 'gone') continue;
+    const dx = a.pos.x - cam.position.x;
+    const dy = a.pos.y + 1.2 - cam.position.y;
+    const dz = a.pos.z - cam.position.z;
+    a.h.root.visible = dx * dx + dy * dy + dz * dz > 1.6 * 1.6;
+  }
 }
 
 /** Number keys pick a weapon; the d-pad steps through the ones you own. */
 function updateWeaponSwap() {
-  if (!player.alive) return;
-  const slot = input.weaponSlotPressed;
-  if (slot !== null && WEAPONS[slot]) {
-    if (owned.has(WEAPONS[slot].id)) equip(WEAPONS[slot], true);
-    else hud.announce('Not yet yours', `Defeat its owner to claim slot ${slot + 1}`);
+  if (player.alive) {
+    const slot = input.weaponSlotPressed;
+    if (slot !== null && WEAPONS[slot]) {
+      if (owned.has(WEAPONS[slot].id)) equip(WEAPONS[slot], true);
+      else hud.announce('Not yet yours', `Defeat its owner to claim slot ${slot + 1}`);
+    }
   }
-  const step = input.weaponCyclePressed;
-  if (step !== 0 && owned.size > 1) {
+  for (const h of ctx.players) {
+    const step = inputOf(h).weaponCyclePressed;
+    if (!h.alive || step === 0 || owned.size < 2) continue;
     const mine = WEAPONS.filter((w) => owned.has(w.id));
-    const i = mine.indexOf(player.weapon);
-    equip(mine[(i + step + mine.length) % mine.length], true);
+    const i = mine.indexOf(h.weapon);
+    equip(mine[(i + step + mine.length) % mine.length], true, h);
   }
 }
 
 /** A fallen leader's weapon waiting to be picked up comes before everything else. */
 function weaponObjective(): Objective | null {
-  const near = drops.nearest(player.pos);
+  const near = drops.nearest(ctx.leader.pos);
   if (!near || campaign.activeFight) return null;
   return { text: `Claim ${near.weapon.name}`, at: near.at };
 }
@@ -689,7 +937,7 @@ let last = performance.now();
 function frame(now: number) {
   tick(Math.min((now - last) / 1000, 0.05));
   last = now;
-  renderer.render(scene, camera);
+  render();
   updateStats(now, performance.now() - now);
   requestAnimationFrame(frame);
 }
@@ -700,6 +948,13 @@ requestAnimationFrame(frame);
 Object.assign(window, {
   __game: {
     player,
+    player2,
+    input2,
+    joinPlayer2,
+    leavePlayer2,
+    get twoPlayer() {
+      return twoPlayer;
+    },
     allies,
     enemies,
     campaign,
@@ -719,7 +974,7 @@ Object.assign(window, {
     },
     step(seconds: number) {
       for (let i = 0; i < Math.round(seconds * 60); i++) tick(1 / 60);
-      renderer.render(scene, camera);
+      render();
     },
   },
 });

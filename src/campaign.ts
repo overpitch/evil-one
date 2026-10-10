@@ -14,6 +14,26 @@ const PATROL_RESPAWN = 45;
 const PATROL_MOVE = 25;
 /** Counterattack size, as a share of the outpost's garrison. */
 const WAVE_SHARE = 0.7;
+/** Seconds between lair waves (after the war is won). */
+const LAIR_REST = 10;
+
+/**
+ * Once the war is won, each leader's lair keeps raising its army in waves
+ * whenever a hero is inside, so there's always something left to fight.
+ * Waves grow from 4 to all 8.
+ */
+const LAIR_KINDS: Record<TerritoryId, EnemyKind[]> = {
+  zombie: ['shambler', 'runner', 'shambler', 'brute', 'runner', 'shambler', 'brute', 'runner'],
+  witch: ['hexer', 'broomWitch', 'hexer', 'hexer', 'broomWitch', 'hexer', 'broomWitch', 'hexer'],
+  vampire: ['thrall', 'knight', 'thrall', 'thrall', 'knight', 'thrall', 'knight', 'thrall'],
+  fortress: ['shambler', 'hexer', 'thrall', 'brute', 'broomWitch', 'knight', 'runner', 'thrall'],
+};
+
+interface Lair {
+  group: EnemyGroup;
+  wave: number;
+  rest: number;
+}
 
 export interface Checkpoint {
   id: string;
@@ -48,6 +68,7 @@ export interface Territory {
   minions: Enemy[];
   bossState: 'sealed' | 'waiting' | 'fighting' | 'defeated';
   victoryTimer: number;
+  lair: Lair;
 }
 
 export interface Objective {
@@ -134,8 +155,11 @@ export class Campaign {
         m.wanderRadius = 3;
         minions.push(m);
       }
+      const lairGroup = new EnemyGroup();
+      for (const kind of LAIR_KINDS[def.id]) member(createEnemy(scene, kind), lairGroup).wanderRadius = 4;
       this.territories.push({
         def,
+        lair: { group: lairGroup, wave: 0, rest: LAIR_REST },
         outposts,
         gate: checkpoint(def.gate.id, def.gate.name, def.gate.x, def.gate.z),
         patrol,
@@ -219,6 +243,10 @@ export class Campaign {
         t.leader.makeDormant();
         t.bossState = 'sealed';
       }
+      for (const e of t.lair.group.members) e.makeDormant();
+      t.lair.group.alerted = false;
+      t.lair.wave = 0;
+      t.lair.rest = LAIR_REST;
       if (t.bossState === 'sealed') this.world.gates[t.def.id].close();
       else this.world.gates[t.def.id].open();
       t.victoryTimer = -1;
@@ -256,12 +284,13 @@ export class Campaign {
   update(dt: number, ctx: GameContext) {
     this.time += dt;
     for (const cp of this.checkpoints) cp.banner.update(dt, this.time);
-    const player = ctx.player;
+    const player = ctx.leader;
+    const heroes = ctx.players.filter((h) => h.alive);
 
-    // Touching a standing banner makes it the checkpoint (heals, reinforces, saves).
-    if (player.alive) {
+    // Touching a standing banner (either hero) makes it the checkpoint (heals, reinforces, saves).
+    if (heroes.length > 0) {
       const inside = this.checkpoints.find(
-        (cp) => cp.unlocked && Math.hypot(player.pos.x - cp.banner.x, player.pos.z - cp.banner.z) < TOUCH_RADIUS,
+        (cp) => cp.unlocked && heroes.some((h) => Math.hypot(h.pos.x - cp.banner.x, h.pos.z - cp.banner.z) < TOUCH_RADIUS),
       );
       if (inside && inside.id !== this.touching) {
         this.touching = inside.id;
@@ -292,7 +321,7 @@ export class Campaign {
       if (!this.isLiberated(t)) this.updatePatrol(t, dt);
 
       const arena = this.centers.get(t.def.id)!;
-      if (t.bossState === 'waiting' && player.alive && !this.activeFight && player.pos.distanceTo(arena) < t.def.arena.r - 2) {
+      if (t.bossState === 'waiting' && !this.activeFight && heroes.some((h) => h.pos.distanceTo(arena) < t.def.arena.r - 2)) {
         this.startBossFight(t, ctx);
       }
       if (t.bossState === 'fighting' && !t.leader.alive) this.endBossFight(t, ctx);
@@ -301,6 +330,42 @@ export class Campaign {
         if (t.victoryTimer < 0) this.afterVictory(t);
       }
     }
+    if (this.victorious && this.fortress.victoryTimer < 0) for (const t of this.territories) this.updateLair(t, ctx, dt);
+  }
+
+  /** After the war: a hero inside a leader's lair brings wave after wave of its army. */
+  private updateLair(t: Territory, ctx: GameContext, dt: number) {
+    const lair = t.lair;
+    if (!lair.group.cleared) return;
+    const { arena } = t.def;
+    const inside = ctx.players.some((h) => h.alive && Math.hypot(h.pos.x - arena.x, h.pos.z - arena.z) < arena.r - 1);
+    if (!inside) return;
+    lair.rest -= dt;
+    if (lair.rest > 0 || !lair.group.members.every((e) => e.readyToRespawn)) return;
+    lair.wave++;
+    lair.rest = LAIR_REST;
+    const count = Math.min(lair.group.members.length, 3 + lair.wave);
+    lair.group.members.slice(0, count).forEach((e, i) => {
+      // They rise all around the lair; witches appear in a puff of smoke.
+      const a = (i / count) * Math.PI * 2 + Math.random() * 0.5;
+      const r = arena.r * (0.45 + Math.random() * 0.3);
+      const x = arena.x + Math.sin(a) * r;
+      const z = arena.z + Math.cos(a) * r;
+      const fromGround = e.faction !== 'witch';
+      e.spawn(x, z, fromGround);
+      if (!fromGround) ctx.particles.burst(new THREE.Vector3(x, e.pos.y + 1.4, z), 0x6a4a8a, 20, 4);
+    });
+    lair.group.alerted = true;
+    sfx.warHorn();
+    const lairName = t.def.requires ? "Zomawi's sanctum" : `${t.def.leader.title}'s lair`;
+    this.events.announce(`${lairName} · Wave ${lair.wave}`, `${count} enemies rise`);
+  }
+
+  /** The nearest leader's lair (for the objective once the war is won). */
+  private nearestLair(from: THREE.Vector3) {
+    return this.territories.reduce((a, b) =>
+      Math.hypot(b.def.arena.x - from.x, b.def.arena.z - from.z) < Math.hypot(a.def.arena.x - from.x, a.def.arena.z - from.z) ? b : a,
+    );
   }
 
   /** Brings a leader's minions in: risen undead, fresh thralls, or the Witch Queen's mirror images. */
@@ -340,7 +405,11 @@ export class Campaign {
    */
   objective(from: THREE.Vector3, heroLevel: number): Objective {
     const open = this.territories.filter((t) => this.isOpen(t) && !this.isLiberated(t));
-    if (open.length === 0) return { text: 'The war is won. The lands are free.', at: null };
+    if (open.length === 0) {
+      // The war is won, but the leaders' lairs still stir.
+      const lair = this.nearestLair(from);
+      return { text: 'The war is won · Enemies still rise in the leaders\' lairs', at: new THREE.Vector3(lair.def.arena.x, 0, lair.def.arena.z) };
+    }
     const here = open.find((t) => territoryWeight(t.def, from.x, from.z) > 0.5);
     const t = here ?? open.reduce((a, b) => (b.def.recommendedLevel < a.def.recommendedLevel ? b : a));
     const advice = heroLevel < t.def.recommendedLevel ? ` (recommended level ${t.def.recommendedLevel})` : '';
@@ -450,12 +519,16 @@ export class Campaign {
     this.world.gates[t.def.id].close();
     t.leader.fightActive = true;
     t.leaderGroup.alerted = true;
-    // Bring the squad inside before the gate shuts.
+    // Bring the squad (and a hero left outside) inside before the gate shuts.
     const arena = this.centers.get(t.def.id)!;
+    const inside = ctx.players.find((h) => h.alive && h.pos.distanceTo(arena) < t.def.arena.r - 1.5) ?? ctx.leader;
     for (const a of ctx.allies) {
       if (a.alive && a.pos.distanceTo(arena) > t.def.arena.r - 1.5) {
-        a.reinforce(ctx.player.pos.x + (Math.random() - 0.5) * 3, ctx.player.pos.z + (Math.random() - 0.5) * 3);
+        a.reinforce(inside.pos.x + (Math.random() - 0.5) * 3, inside.pos.z + (Math.random() - 0.5) * 3);
       }
+    }
+    for (const h of ctx.players) {
+      if (h !== inside && h.pos.distanceTo(arena) > t.def.arena.r - 1.5) h.teleport(inside.pos.x + 1.5, inside.pos.z, inside.yaw);
     }
     if (t.def.id === 'witch') sfx.cackle(1);
     else if (t.def.id === 'vampire') sfx.bats(1);

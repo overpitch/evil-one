@@ -71,10 +71,10 @@ export class WeaponDrops {
     return best ? { weapon: best.weapon, at: best.pos } : null;
   }
 
-  /** Spins the weapons; returns one the hero just walked into, if any. */
-  update(dt: number, hero: THREE.Vector3 | null, particles: Particles): WeaponDef | null {
+  /** Spins the weapons; returns one a hero just walked into, and who. */
+  update<H extends { pos: THREE.Vector3 }>(dt: number, heroes: H[], particles: Particles): { weapon: WeaponDef; by: H } | null {
     this.time += dt;
-    let picked: WeaponDef | null = null;
+    let picked: { weapon: WeaponDef; by: H } | null = null;
     for (const d of this.drops.values()) {
       if (!d.active) continue;
       // Standing on its hilt, blade up, turning slowly.
@@ -85,12 +85,13 @@ export class WeaponDrops {
         d.sparkle = 0.25;
         particles.burst(new THREE.Vector3(d.pos.x, d.pos.y + 1.3, d.pos.z), d.weapon.color, 2, 1.5);
       }
-      if (hero && !picked && Math.hypot(hero.x - d.pos.x, hero.z - d.pos.z) < PICKUP_RADIUS) {
+      const hero = heroes.find((h) => Math.hypot(h.pos.x - d.pos.x, h.pos.z - d.pos.z) < PICKUP_RADIUS);
+      if (hero && !picked) {
         d.active = false;
         d.group.visible = false;
         particles.burst(new THREE.Vector3(d.pos.x, d.pos.y + 1.3, d.pos.z), d.weapon.color, 30, 6);
         particles.burst(new THREE.Vector3(d.pos.x, d.pos.y + 1.3, d.pos.z), 0xffd36b, 16, 4);
-        picked = d.weapon;
+        picked = { weapon: d.weapon, by: hero };
       }
     }
     return picked;

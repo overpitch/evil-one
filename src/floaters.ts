@@ -19,7 +19,7 @@ export class Floaters {
   private next = 0;
   private readonly projected = new THREE.Vector3();
 
-  constructor(container: HTMLElement) {
+  constructor(private readonly container: HTMLElement) {
     for (let i = 0; i < POOL_SIZE; i++) {
       const el = document.createElement('div');
       el.className = 'floater';
@@ -44,8 +44,9 @@ export class Floaters {
   }
 
   update(dt: number, camera: THREE.Camera) {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    // Positions are within this hero's view (the whole screen, or half of it in two-player).
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
     for (const f of this.pool) {
       if (!f.active) continue;
       f.age += dt;
