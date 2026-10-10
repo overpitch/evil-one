@@ -14,11 +14,12 @@ import { initAudio, musicOutput, setVolumes, sfx } from './audio';
 import { Music, type Mood, type Theme } from './music';
 import { MenuNavigator } from './menuNav';
 import { Campaign, type Objective } from './campaign';
-import { CAMP_BANNER, FORT, TERRITORIES, type ShopKind } from './layout';
+import { CAMP_BANNER, FORT, TERRITORIES, type LeaderId, type ShopKind } from './layout';
+import { XP_REWARD } from './progression';
 import { ARMOR, goldFor, loadGoods, newGoods, MAX_ARMY, MAX_POTIONS, OUTPOST_GOLD, POTION_PRICE, SOLDIER_PRICE, type Goods } from './shop';
 import type { ShopEntry } from './hud';
 import { DEFAULT_OUTFIT, loadOutfit, type Outfit } from './outfit';
-import { WeaponDrops } from './loot';
+import { CoinPiles, WeaponDrops } from './loot';
 import { isWeaponId, STARTING_WEAPON, WEAPONS, weaponOf, type WeaponDef, type WeaponId } from './weapons';
 import { DIFFICULTIES, IS_XBOX, loadSettings, saveSettings, type Settings } from './settings';
 import { loadSave, newSave, useTestSaveSlot, writeSave, type SaveData } from './save';
@@ -59,6 +60,8 @@ const world = createWorld(scene);
 const particles = new Particles(scene);
 const projectiles = new Projectiles(scene);
 const drops = new WeaponDrops(scene);
+/** Piles of gold coins where leaders fell. */
+const coinPiles = new CoinPiles(scene);
 const player = new Player(scene);
 /** Player 2's hero, in blue. Only in the world while two people play. */
 const player2 = new Player(scene, true);
@@ -160,9 +163,14 @@ const ctx: GameContext = {
   onEnemyKilled: (z) => {
     if (z.xpReward === 0) return; // the Witch Queen's mirror images don't count
     kills++;
-    const gold = goldFor(z.xpReward, z.isBoss);
-    floatText(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP · +${gold} gold`, 'xp');
-    awardGold(gold);
+    if (z.isBoss) {
+      // Leaders drop a pile of coins to scoop up (see leaderDefeated).
+      floatText(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP`, 'xp');
+    } else {
+      const gold = goldFor(z.xpReward, false);
+      floatText(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP · +${gold} gold`, 'xp');
+      awardGold(gold);
+    }
     awardXp(z.xpReward);
   },
   summonMinions: (around, count) => campaign.summonMinions(around, count, ctx),
@@ -197,6 +205,16 @@ const campaign = new Campaign(scene, world, enemies, {
     const w = weaponOf(id);
     if (w && activeHeroes().some((h) => needsDrop(h, w.id))) drops.place(w.id, at.x, at.z);
     if (id === 'zomawi') endingSeen = false;
+    // Its gold spills out beside its weapon.
+    // (A couple of meters toward the arena's middle, so it never lands in the goo castle's goo.)
+    const land = TERRITORIES.find((t) => t.leader.id === id);
+    if (land && activeHeroes().some((h) => needsCoins(h, id))) {
+      const dx = land.arena.x - at.x;
+      const dz = land.arena.z - at.z;
+      const d = Math.hypot(dx, dz);
+      const k = d > 2.5 ? 2.5 / d : 0;
+      coinPiles.place(id, at.x + dx * k + (k === 0 ? 2 : 0), at.z + dz * k);
+    }
   },
   victory: () => {
     saveGame();
@@ -281,7 +299,7 @@ function saveP2() {
 function becomeHero(hero: Player2Hero) {
   p2Hero = hero;
   choosingP2 = false;
-  player2.goods = goodsFrom(hero.goods, hero.weapons);
+  player2.goods = goodsFrom(hero.goods, hero.weapons, campaign.leaders);
   player2.setOutfit(loadOutfit(hero.outfit ?? P2_OUTFIT));
   player2.loadHero(hero.name, hero.level, hero.xp);
   owned2.clear();
@@ -291,6 +309,7 @@ function becomeHero(hero: Player2Hero) {
   player2.hp = player2.maxHp;
   player2.stamina = player2.maxStamina;
   placeMissingDrops(campaign.leaders);
+  placeMissingCoins(campaign.leaders);
   reinforceSquad();
   hud.showP2Picker(null);
   saveHero(hero);
@@ -323,6 +342,39 @@ function activeHeroes() {
 /** Takes away any leader's weapon on the ground that no hero playing still needs. */
 function removeUnneededDrops() {
   for (const w of WEAPONS) if (w.from && drops.isOut(w.id) && !activeHeroes().some((h) => needsDrop(h, w.id))) drops.remove(w.id);
+  for (const id of coinPiles.out) if (!activeHeroes().some((h) => needsCoins(h, id))) coinPiles.remove(id);
+}
+
+/** This hero hasn't scooped up this leader's pile of gold yet. */
+function needsCoins(h: Player, leaderId: string) {
+  return !h.goods.coins.includes(leaderId);
+}
+
+/** Gold in a leader's pile of coins (a quarter of its XP). */
+function coinValue(leaderId: string) {
+  return goldFor(XP_REWARD[leaderId as LeaderId] ?? 0, true);
+}
+
+/** Puts each beaten leader's coins back in its lair until every hero playing has scooped up their share. */
+function placeMissingCoins(leaders: Iterable<string>) {
+  for (const id of leaders) {
+    const land = TERRITORIES.find((t) => t.leader.id === id);
+    if (land && !coinPiles.isOut(id) && activeHeroes().some((h) => needsCoins(h, id))) coinPiles.place(id, land.arena.x + 2, land.arena.z + 1);
+  }
+}
+
+/** Walked into a leader's pile of coins: this hero's share of the gold. */
+function collectCoins(id: string, hero: Player) {
+  const value = coinValue(id);
+  hero.goods.gold += value;
+  hero.goods.coins.push(id);
+  if (activeHeroes().every((h) => !needsCoins(h, id))) coinPiles.remove(id);
+  floatText(new THREE.Vector3(hero.pos.x, hero.pos.y + 2.2, hero.pos.z), `+${value} gold`, 'xp');
+  sfx.levelUp();
+  const land = TERRITORIES.find((t) => t.leader.id === id);
+  const who = twoPlayer ? `${hero.name} · ` : '';
+  hud.announce(`+${value} gold`, `${who}${land ? `${land.leader.title}'s treasure` : 'Treasure'} · spend it at Fort Victory`, true);
+  saveWeapons();
 }
 
 /** This hero hasn't picked up this leader's weapon yet. */
@@ -331,9 +383,11 @@ function needsDrop(h: Player, id: WeaponId) {
 }
 
 /** A hero's goods from a save. Older saves: any leader weapons they have count as picked up. */
-function goodsFrom(raw: Partial<Goods> | undefined, weapons: readonly string[]): Goods {
+function goodsFrom(raw: Partial<Goods> | undefined, weapons: readonly string[], leaders: Iterable<string>): Goods {
   const goods = loadGoods(raw);
   if (!raw) goods.claimed = weapons.filter((id): id is WeaponId => isWeaponId(id) && WEAPONS.some((w) => w.id === id && w.from !== null));
+  // Saves from before coin piles: leaders beaten then already paid out their gold.
+  if (!raw?.coins) goods.coins = [...leaders];
   return goods;
 }
 
@@ -355,11 +409,13 @@ function loadWeapons(save: SaveData | null) {
   const claimed = save?.weapons ?? leaders.map((id) => weaponOf(id)?.id);
   for (const id of claimed) if (isWeaponId(id)) owned.add(id);
   player.setWeapon(isWeaponId(save?.weapon) && owned.has(save.weapon) ? save.weapon : STARTING_WEAPON);
-  player.goods = goodsFrom(save?.goods, [...owned]);
+  player.goods = goodsFrom(save?.goods, [...owned], save?.leaders ?? []);
   player.refreshStats();
   if (save?.outfit || player.outfit !== DEFAULT_OUTFIT) player.setOutfit(loadOutfit(save?.outfit));
   drops.clear();
   placeMissingDrops(leaders);
+  coinPiles.clear();
+  placeMissingCoins(leaders);
 }
 
 /** Whose weapon the open inventory is choosing. */
@@ -463,7 +519,7 @@ function enterWorld(save: SaveData) {
     const saved = p2Hero && loadHeroes().find((h) => h.id === p2Hero!.id);
     if (saved) {
       p2Hero = saved;
-      player2.goods = goodsFrom(saved.goods, saved.weapons);
+      player2.goods = goodsFrom(saved.goods, saved.weapons, campaign.leaders);
       player2.loadHero(saved.name, saved.level, saved.xp);
     }
     if (!owned2.has(player2.weapon.id)) player2.setWeapon(STARTING_WEAPON);
@@ -1224,6 +1280,8 @@ function tick(realDt: number) {
       projectiles.update(dt, ctx);
       const claimed = drops.update(dt, ctx.players.filter((h) => h.alive), particles, (h, w) => needsDrop(h, w.id));
       if (claimed) claimWeapon(claimed.weapon, claimed.by);
+      const scooped = coinPiles.update(dt, activeHeroes().filter((h) => h.alive), particles, needsCoins);
+      if (scooped) collectCoins(scooped.id, scooped.by);
       particles.update(dt);
       floaters.update(dt, camera);
       if (twoPlayer) floaters2.update(dt, camera2);
@@ -1333,9 +1391,13 @@ function updateWeaponSwap(browsing: Player | null) {
 
 /** A fallen leader's weapon waiting to be picked up comes before everything else. */
 function weaponObjective(): Objective | null {
+  if (campaign.activeFight) return null;
   const near = drops.nearest(ctx.leader.pos, (w) => activeHeroes().some((h) => needsDrop(h, w.id)));
-  if (!near || campaign.activeFight) return null;
-  return { text: `Claim ${near.weapon.name}`, at: near.at };
+  if (near) return { text: `Claim ${near.weapon.name}`, at: near.at };
+  const pile = coinPiles.nearest(ctx.leader.pos, (id) => activeHeroes().some((h) => needsCoins(h, id)));
+  if (!pile) return null;
+  const land = TERRITORIES.find((t) => t.leader.id === pile.id);
+  return { text: `Collect ${land ? `${land.leader.title.replace(/^The /, 'the ')}'s` : 'the'} gold`, at: pile.at };
 }
 
 // ---------- Xbox ----------
@@ -1447,6 +1509,7 @@ Object.assign(window, {
     campaign,
     projectiles,
     drops,
+    coinPiles,
     music,
     /** The running audio context (null until the first click). */
     audio: () => musicOutput()?.ac ?? null,

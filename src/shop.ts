@@ -16,10 +16,12 @@ export interface Goods {
   pawned: WeaponId[];
   /** Leaders' weapons this hero has already picked up (so a sold one doesn't reappear in its lair). */
   claimed: WeaponId[];
+  /** Leaders whose pile of gold coins this hero has scooped up. */
+  coins: string[];
 }
 
 export function newGoods(): Goods {
-  return { gold: 0, potions: 0, armor: 0, soldiers: 0, pawned: [], claimed: [] };
+  return { gold: 0, potions: 0, armor: 0, soldiers: 0, pawned: [], claimed: [], coins: [] };
 }
 
 /** Reads goods from a save, filling anything missing. */
@@ -33,6 +35,7 @@ export function loadGoods(raw: Partial<Goods> | undefined): Goods {
   g.soldiers = n(raw.soldiers, MAX_ARMY);
   g.pawned = Array.isArray(raw.pawned) ? (raw.pawned.filter((w) => typeof w === 'string') as WeaponId[]) : [];
   g.claimed = Array.isArray(raw.claimed) ? (raw.claimed.filter((w) => typeof w === 'string') as WeaponId[]) : [];
+  g.coins = Array.isArray(raw.coins) ? raw.coins.filter((id) => typeof id === 'string') : [];
   return g;
 }
 

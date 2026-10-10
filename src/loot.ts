@@ -113,3 +113,106 @@ export class WeaponDrops {
     return picked;
   }
 }
+
+/**
+ * A pile of gold coins where a leader fell. Each hero walks into it to
+ * scoop up their own share; it stays until every hero playing has.
+ */
+export class CoinPiles {
+  private readonly piles = new Map<string, { group: THREE.Group; pos: THREE.Vector3; active: boolean; sparkle: number }>();
+  private time = 0;
+
+  constructor(private readonly scene: THREE.Scene) {}
+
+  private pile(id: string) {
+    let p = this.piles.get(id);
+    if (p) return p;
+    const group = new THREE.Group();
+    const gold = new THREE.MeshLambertMaterial({ color: 0xffc23a, emissive: 0x6a4a00, flatShading: true });
+    const coin = new THREE.CylinderGeometry(0.22, 0.22, 0.06, 10);
+    // A heap in the middle, and coins spilled around it.
+    const heap = new THREE.Mesh(new THREE.ConeGeometry(0.75, 0.6, 9), gold);
+    heap.position.y = 0.3;
+    group.add(heap);
+    for (let i = 0; i < 14; i++) {
+      const c = new THREE.Mesh(coin, gold);
+      const a = (i / 14) * Math.PI * 2 + (i % 3) * 0.4;
+      const d = 0.6 + (i % 4) * 0.25;
+      c.position.set(Math.sin(a) * d, 0.04 + (i % 2) * 0.05, Math.cos(a) * d);
+      c.rotation.set((i % 3) * 0.3, a, (i % 2) * 0.4);
+      group.add(c);
+    }
+    const glow = new THREE.Mesh(
+      new THREE.RingGeometry(0.4, 1.6, 24).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.35, depthWrite: false }),
+    );
+    glow.position.y = 0.05;
+    group.add(glow);
+    group.traverse((o) => (o.castShadow = true));
+    group.visible = false;
+    this.scene.add(group);
+    p = { group, pos: new THREE.Vector3(), active: false, sparkle: 0 };
+    this.piles.set(id, p);
+    return p;
+  }
+
+  /** Drops leader `id`'s coins at (x, z). */
+  place(id: string, x: number, z: number) {
+    const p = this.pile(id);
+    p.pos.set(x, heightAt(x, z), z);
+    p.group.position.copy(p.pos);
+    p.group.visible = true;
+    p.active = true;
+  }
+
+  remove(id: string) {
+    const p = this.piles.get(id);
+    if (!p) return;
+    p.active = false;
+    p.group.visible = false;
+  }
+
+  isOut(id: string) {
+    return this.piles.get(id)?.active ?? false;
+  }
+
+  /** Leader ids whose coins are on the ground. */
+  get out() {
+    return [...this.piles.entries()].filter(([, p]) => p.active).map(([id]) => id);
+  }
+
+  clear() {
+    for (const id of this.piles.keys()) this.remove(id);
+  }
+
+  /** The nearest pile (that `wanted` accepts), for the objective marker. */
+  nearest(from: THREE.Vector3, wanted: (id: string) => boolean): { id: string; at: THREE.Vector3 } | null {
+    let best: { id: string; at: THREE.Vector3 } | null = null;
+    for (const [id, p] of this.piles) {
+      if (!p.active || !wanted(id)) continue;
+      if (!best || p.pos.distanceToSquared(from) < best.at.distanceToSquared(from)) best = { id, at: p.pos };
+    }
+    return best;
+  }
+
+  /** Glints; returns a pile a hero who still `needs` it just walked into, and who. */
+  update<H extends { pos: THREE.Vector3 }>(dt: number, heroes: H[], particles: Particles, needs: (hero: H, id: string) => boolean) {
+    this.time += dt;
+    let picked: { id: string; by: H } | null = null;
+    for (const [id, p] of this.piles) {
+      if (!p.active) continue;
+      p.group.rotation.y = this.time * 0.5;
+      p.sparkle -= dt;
+      if (p.sparkle <= 0) {
+        p.sparkle = 0.2;
+        particles.burst(new THREE.Vector3(p.pos.x, p.pos.y + 0.6, p.pos.z), 0xffe08a, 2, 1.8);
+      }
+      const hero = heroes.find((h) => needs(h, id) && Math.hypot(h.pos.x - p.pos.x, h.pos.z - p.pos.z) < 1.9);
+      if (hero && !picked) {
+        particles.burst(new THREE.Vector3(p.pos.x, p.pos.y + 0.6, p.pos.z), 0xffd36b, 40, 6);
+        picked = { id, by: hero };
+      }
+    }
+    return picked;
+  }
+}
