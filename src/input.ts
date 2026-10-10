@@ -54,6 +54,8 @@ export class Input {
   lastPadInput = -Infinity;
   onLockChange?: (locked: boolean) => void;
 
+  /** The browser turns the controller into key presses (an Xbox, or anything sending 'Gamepad' keys). */
+  private consoleBrowser = IS_XBOX;
   private readonly down = new Set<string>();
   private readonly pressed = new Set<string>();
   private clicked = false;
@@ -72,7 +74,12 @@ export class Input {
       if (e.target instanceof HTMLInputElement && e.target.type === 'text') return;
       // Console browsers turn the controller into arrow/"Gamepad" key presses while in
       // browser mode, and may never send the matching release: don't treat them as keys.
-      if (e.key.startsWith('Gamepad') || (IS_XBOX && e.code.startsWith('Arrow'))) return;
+      if (e.key.startsWith('Gamepad')) {
+        this.consoleBrowser = true;
+        this.down.clear();
+        return;
+      }
+      if (this.consoleBrowser && e.code.startsWith('Arrow')) return;
       if (GAME_KEYS.has(e.code)) e.preventDefault();
       if (!e.repeat) this.pressed.add(e.code);
       this.down.add(e.code);
@@ -188,9 +195,14 @@ export class Input {
     return performance.now() - this.lastPadInput < 3000;
   }
 
-  /** Keyboard keys, unless the controller is in charge. */
+  /**
+   * Keyboard keys, unless the controller is in charge. On a console the
+   * hero only moves with the controller: the browser there invents key
+   * presses from the controller and can lose the release, leaving the hero
+   * walking on their own.
+   */
   private key(...codes: string[]) {
-    return !this.padActive && this.isDown(...codes);
+    return !this.consoleBrowser && !this.padActive && this.isDown(...codes);
   }
 
   /** Movement intent: x = strafe right, z = forward, length up to 1. Keys or left stick. */
@@ -231,7 +243,8 @@ export class Input {
   debugText() {
     const p = this.pad;
     const raw = p ? Array.from(p.axes.slice(0, 4), (a) => a.toFixed(2)).join(' ') : 'none';
-    return `pad ${p ? p.mapping || 'non-standard' : 'none'} · sticks ${raw} · keys ${[...this.down].join(',') || 'none'}`;
+    const buttons = p ? p.buttons.flatMap((b, i) => (b.pressed ? [i] : [])).join(',') || 'none' : 'none';
+    return `pad ${p ? p.mapping || 'non-standard' : 'none'} · sticks ${raw} · buttons ${buttons} · keys ${[...this.down].join(',') || 'none'} · ${this.consoleBrowser ? 'console' : 'computer'}`;
   }
 
   get mapPressed() {

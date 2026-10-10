@@ -953,3 +953,9 @@ button.weapon-card.locked {
   color: #b8ad96;
   white-space: pre-wrap;
 }
+
+.pad-debug {
+  margin: 0;
+  font: 11px/1.4 ui-monospace, Menlo, monospace;
+  color: #6f6758;
+}

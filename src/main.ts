@@ -572,6 +572,8 @@ function tick(realDt: number) {
   world.update(player.pos, realDt, campaign.gloomAt(player.pos));
   updateSound(realDt);
   updateXboxTip(realDt);
+  // A live controller readout on the pause screen, for tracking down stuck sticks or keys.
+  if (hud.pauseOpen) hud.setPadDebug(input.debugText());
   for (const z of enemies) z.updateBar(camera);
   hud.update(player, kills);
   hud.setWeapon(player.weapon);

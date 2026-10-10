@@ -409,6 +409,12 @@ export class Hud {
     $('weapon-tag-name').textContent = w.name;
   }
 
+  setPadDebug(text: string) {
+    const el = $('pad-debug');
+    const line = `Controller check: ${text}`;
+    if (el.textContent !== line) el.textContent = line;
+  }
+
   get pauseOpen() {
     return !this.pause.classList.contains('hidden');
   }
