@@ -143,15 +143,36 @@ export function createHumanoid(look: HumanoidLook): Humanoid {
  * (glowing eyes stay separate so they still glow). Child groups (the sword)
  * are left alone.
  */
+/**
+ * Merged body parts, shared by every character whose part looks the same
+ * (all shamblers share one set). Giving each character its own copies made
+ * thousands of tiny graphics buffers, which the Xbox's browser runs out of
+ * memory on.
+ */
+const mergedParts = new Map<string, THREE.BufferGeometry>();
+
+function mergeShared(meshes: THREE.Mesh[], colored: boolean) {
+  const key = meshes
+    .map((m) => {
+      m.updateMatrix();
+      const color = colored ? `:${(m.material as THREE.MeshLambertMaterial).color.getHexString()}` : '';
+      return `${m.geometry.uuid}:${m.matrix.elements.map((v) => v.toFixed(3)).join(',')}${color}`;
+    })
+    .join('|');
+  let geo = mergedParts.get(key);
+  if (!geo) {
+    const parts = meshes.map((m) => (colored ? coloredGeometry(m) : m.geometry.clone().applyMatrix4(m.matrix)));
+    geo = parts.length === 1 ? parts[0] : mergeGeometries(parts);
+    mergedParts.set(key, geo);
+  }
+  return geo;
+}
+
 function mergeParts(group: THREE.Group, material: THREE.Material) {
   // Glowing eyes: both into one mesh, keeping their glow material.
   const glows = group.children.filter((c): c is THREE.Mesh => c instanceof THREE.Mesh && c.material instanceof THREE.MeshBasicMaterial);
   if (glows.length > 1) {
-    const geos = glows.map((m) => {
-      m.updateMatrix();
-      return m.geometry.clone().applyMatrix4(m.matrix);
-    });
-    const eyes = new THREE.Mesh(mergeGeometries(geos), glows[0].material);
+    const eyes = new THREE.Mesh(mergeShared(glows, false), glows[0].material);
     for (const m of glows) group.remove(m);
     group.add(eyes);
   }
@@ -161,15 +182,14 @@ function mergeParts(group: THREE.Group, material: THREE.Material) {
   if (boxes.length < 2) {
     if (boxes.length === 1) {
       // Still use the shared vertex-colored material so the hit flash reaches it.
-      const geo = coloredGeometry(boxes[0]);
-      const mesh = new THREE.Mesh(geo, material);
+      const mesh = new THREE.Mesh(mergeShared(boxes, true), material);
       mesh.castShadow = true;
       group.remove(boxes[0]);
       group.add(mesh);
     }
     return;
   }
-  const merged = mergeGeometries(boxes.map(coloredGeometry));
+  const merged = mergeShared(boxes, true);
   for (const b of boxes) group.remove(b);
   const mesh = new THREE.Mesh(merged, material);
   mesh.castShadow = true;

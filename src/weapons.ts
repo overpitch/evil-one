@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { boxShape } from './shapes';
 import type { LeaderId } from './layout';
 
 export type WeaponId = 'sword' | 'gravebreaker' | 'hexfire' | 'bloodfang' | 'doomblade' | 'spear' | 'daggers' | 'axe' | 'hammer';
@@ -64,7 +65,7 @@ function mat(color: number, glow = false) {
 }
 
 function box(g: THREE.Group, w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+  const mesh = new THREE.Mesh(boxShape(w, h, d), m);
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
   g.add(mesh);

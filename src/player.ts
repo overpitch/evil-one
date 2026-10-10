@@ -226,10 +226,7 @@ export class Player implements Target {
     h.root.visible = old.root.visible;
     old.root.parent?.add(h.root);
     old.root.removeFromParent();
-    // The old body's own geometry (not the shared weapon and armor pieces, which moved over).
-    old.root.traverse((o) => {
-      if (o instanceof THREE.Mesh && o.geometry.attributes.color) o.geometry.dispose();
-    });
+    // (The old body's shapes are shared with other characters, so they're kept.)
     this.h = h;
   }
 

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { boxShape } from './shapes';
 import type { Humanoid } from './character';
 import { Enemy, type EnemyStats } from './enemy';
 import { XP_REWARD } from './progression';
@@ -36,19 +37,19 @@ export class Ghostface extends Enemy {
       return mesh;
     };
     // The mask: long drooping eyes and a stretched, screaming mouth.
-    for (const side of [1, -1]) add(h.head, new THREE.BoxGeometry(0.08, 0.14, 0.02), ink, 0.08 * side, 0.25, 0.19).rotation.z = -side * 0.25;
-    add(h.head, new THREE.BoxGeometry(0.07, 0.16, 0.02), ink, 0, 0.07, 0.19);
+    for (const side of [1, -1]) add(h.head, boxShape(0.08, 0.14, 0.02), ink, 0.08 * side, 0.25, 0.19).rotation.z = -side * 0.25;
+    add(h.head, boxShape(0.07, 0.16, 0.02), ink, 0, 0.07, 0.19);
     // The hood around the mask.
-    add(h.head, new THREE.BoxGeometry(0.46, 0.1, 0.46), black, 0, 0.42, -0.02);
-    add(h.head, new THREE.BoxGeometry(0.46, 0.5, 0.08), black, 0, 0.2, -0.22);
-    for (const side of [1, -1]) add(h.head, new THREE.BoxGeometry(0.06, 0.5, 0.44), black, 0.22 * side, 0.2, -0.01);
+    add(h.head, boxShape(0.46, 0.1, 0.46), black, 0, 0.42, -0.02);
+    add(h.head, boxShape(0.46, 0.5, 0.08), black, 0, 0.2, -0.22);
+    for (const side of [1, -1]) add(h.head, boxShape(0.06, 0.5, 0.44), black, 0.22 * side, 0.2, -0.01);
     // A long robe hanging below the waist.
-    add(h.hips, new THREE.BoxGeometry(0.6, 0.75, 0.36), black, 0, -0.38, 0);
+    add(h.hips, boxShape(0.6, 0.75, 0.36), black, 0, -0.38, 0);
     // The knife, held point-down.
     const knife = new THREE.Group();
     knife.position.set(0, -0.64, 0);
-    add(knife, new THREE.BoxGeometry(0.04, 0.04, 0.14), black, 0, 0, 0);
-    add(knife, new THREE.BoxGeometry(0.04, 0.4, 0.015), new THREE.MeshLambertMaterial({ color: 0xd8dde3 }), 0, -0.24, 0.02);
+    add(knife, boxShape(0.04, 0.04, 0.14), black, 0, 0, 0);
+    add(knife, boxShape(0.04, 0.4, 0.015), new THREE.MeshLambertMaterial({ color: 0xd8dde3 }), 0, -0.24, 0.02);
     h.armR.add(knife);
   }
 

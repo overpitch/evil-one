@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { boxShape, coneShape, cylinderShape, icoShape } from './shapes';
 import type { Humanoid, HumanoidLook } from './character';
 import { Enemy, RISE_TIME, pick, propMaterial, type EnemyStats } from './enemy';
 import type { GameContext, Target } from './types';
@@ -31,23 +32,23 @@ export function witchLook(robe = pick([0x3a2450, 0x2a2a3a, 0x4a2040])): Humanoid
 /** Pointy hat and a robe skirt hiding the legs. Returns the glowing orb held in the right hand. */
 export function dressWitch(h: Humanoid, robe: number, hatColor = 0x1e1626, band?: number) {
   const hatMat = propMaterial(hatColor);
-  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.04, 10), hatMat);
+  const brim = new THREE.Mesh(cylinderShape(0.4, 0.4, 0.04, 10), hatMat);
   brim.position.y = 0.4;
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.62, 8), hatMat);
+  const cone = new THREE.Mesh(coneShape(0.22, 0.62, 8), hatMat);
   cone.position.set(0, 0.7, -0.04);
   cone.rotation.x = -0.25;
   h.head.add(brim, cone);
   if (band !== undefined) {
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.235, 0.235, 0.08, 10), propMaterial(band));
+    const ring = new THREE.Mesh(cylinderShape(0.235, 0.235, 0.08, 10), propMaterial(band));
     ring.position.y = 0.46;
     h.head.add(ring);
   }
-  const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.62, 0.42), propMaterial(robe));
+  const skirt = new THREE.Mesh(boxShape(0.6, 0.62, 0.42), propMaterial(robe));
   skirt.position.y = -0.32;
   h.hips.add(skirt);
   for (const m of [brim, cone, skirt]) m.castShadow = true;
 
-  const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.11, 0), new THREE.MeshBasicMaterial({ color: 0xd8a8ff }));
+  const orb = new THREE.Mesh(icoShape(0.11), new THREE.MeshBasicMaterial({ color: 0xd8a8ff }));
   orb.position.y = -0.74;
   orb.visible = false;
   h.armR.add(orb);
@@ -260,9 +261,9 @@ export class BroomWitch extends Enemy {
     this.wanderRadius = 6;
     dressWitch(this.h, look.shirt);
     // Broom under the hips: a long handle with a bristle tail behind.
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.8), propMaterial(0x6a4a2a));
+    const handle = new THREE.Mesh(boxShape(0.06, 0.06, 1.8), propMaterial(0x6a4a2a));
     handle.position.set(0, -0.12, 0.1);
-    const bristles = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.6, 6), propMaterial(0xb89a5a));
+    const bristles = new THREE.Mesh(coneShape(0.2, 0.6, 6), propMaterial(0xb89a5a));
     bristles.rotation.x = -Math.PI / 2;
     bristles.position.set(0, -0.12, -0.95);
     this.broom.add(handle, bristles);

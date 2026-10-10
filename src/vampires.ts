@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { customShape } from './shapes';
 import type { Humanoid, HumanoidLook } from './character';
 import { Enemy, pick, propMaterial, type EnemyStats } from './enemy';
 import type { GameContext, Target } from './types';
@@ -28,7 +29,7 @@ export function vampireLook(kind: VampireKind | 'lord'): HumanoidLook {
 
 /** A long cape hanging from the shoulders. */
 export function addCape(h: Humanoid, color: number) {
-  const cape = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.15, 0.05).translate(0, -0.55, 0), propMaterial(color));
+  const cape = new THREE.Mesh(customShape('cape', () => new THREE.BoxGeometry(0.62, 1.15, 0.05).translate(0, -0.55, 0)), propMaterial(color));
   cape.position.set(0, 0.62, -0.19);
   cape.castShadow = true;
   h.torso.add(cape);

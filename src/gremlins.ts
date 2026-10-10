@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { coneShape } from './shapes';
 import type { Humanoid } from './character';
 import { Enemy, pick, type EnemyStats } from './enemy';
 import { XP_REWARD } from './progression';
@@ -32,7 +33,7 @@ export class Gremlin extends Enemy {
     h.materials.push(skinMat);
     // Big pointy ears, sticking out sideways.
     for (const side of [1, -1]) {
-      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.5, 4), skinMat);
+      const ear = new THREE.Mesh(coneShape(0.11, 0.5, 4), skinMat);
       ear.position.set(0.3 * side, 0.26, 0);
       ear.rotation.z = -side * 1.25;
       ear.castShadow = true;
@@ -41,7 +42,7 @@ export class Gremlin extends Enemy {
     // A wide grin full of sharp teeth.
     const teeth = new THREE.MeshBasicMaterial({ color: 0xf4f0e0 });
     for (let i = -2; i <= 2; i++) {
-      const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.07, 3), teeth);
+      const tooth = new THREE.Mesh(coneShape(0.025, 0.07, 3), teeth);
       tooth.position.set(i * 0.045, 0.1, 0.185);
       tooth.rotation.x = Math.PI;
       h.head.add(tooth);
