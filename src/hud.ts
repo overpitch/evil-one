@@ -29,13 +29,27 @@ const CONTROLS: [string, string][] = [
   ['Esc', 'Pause'],
 ];
 
+/** The same list for an Xbox controller. */
+const PAD_CONTROLS: [string, string][] = [
+  ['Left stick', 'Move'],
+  ['Right stick', 'Look'],
+  ['RT or X', 'Attack (keep pressing for a 3-hit combo)'],
+  ['LT or LB (hold)', 'Block'],
+  ['A', 'Dodge roll'],
+  ['B (hold)', 'Sprint'],
+  ['View', 'Map'],
+  ['Y', 'Inventory (choose your weapon)'],
+  ['D-pad left / right', 'Quick-swap weapon'],
+  ['Menu', 'Pause'],
+];
+
 const RANDOM_NAMES = [
   'Aldric', 'Brenna', 'Cedric', 'Elara', 'Gareth', 'Isolde', 'Rowan',
   'Thorne', 'Wren', 'Osric', 'Maren', 'Bram', 'Sable', 'Tamsin',
 ];
 
 const DEATH_TIPS = [
-  'An enemy glowing orange is about to strike. Hold Q to block, then hit back.',
+  'An enemy glowing orange is about to strike. Block (hold LT, or Q on a keyboard), then hit back.',
   'Blocking costs stamina. When the bar runs low, step back or roll instead.',
   'Shockwaves, meteors and grabs can\'t be blocked. Roll through or away from them.',
   'Leaders pause after their combos. That\'s your moment to attack.',
@@ -233,16 +247,17 @@ export class Hud {
     const view2 = $('view2');
     view2.replaceChildren(...[...view1.children].map((c) => c.cloneNode(true)));
     this.views = [new HeroView(view1), new HeroView(view2)];
+    // Two versions of each controls list: keyboard, and Xbox controller (shown while one is in use).
     for (const dl of document.querySelectorAll('[data-controls]')) {
-      for (const [keys, action] of CONTROLS) {
-        const dt = document.createElement('dt');
-        dt.textContent = keys;
-        const dd = document.createElement('dd');
-        dd.textContent = action;
-        dl.append(dt, dd);
+      for (const [list, only] of [[CONTROLS, 'keys-only'], [PAD_CONTROLS, 'pad-only']] as const) {
+        for (const [keys, action] of list) {
+          const dt = Object.assign(document.createElement('dt'), { textContent: keys, className: only });
+          const dd = Object.assign(document.createElement('dd'), { textContent: action, className: only });
+          dl.append(dt, dd);
+        }
       }
       const pad = document.createElement('p');
-      pad.className = 'pad-controls';
+      pad.className = 'pad-controls keys-only';
       pad.textContent =
         'Controller: left stick move · right stick look · RT or X attack · LT or LB block · A roll · B sprint · Y inventory · D-pad left/right swap weapon · View map · Menu pause';
       dl.after(pad);
@@ -538,6 +553,7 @@ export class Hud {
 
   /** Button hints match what's being played with: Xbox buttons for a controller, keys for a keyboard. */
   setButtonHints(controller: boolean) {
+    document.body.classList.toggle('pad-mode', controller);
     const hint = controller ? 'View · Map \u00a0 Y · Inventory' : 'M · Map \u00a0 I · Inventory';
     const el = $('hud-hint');
     if (el.textContent !== hint) {

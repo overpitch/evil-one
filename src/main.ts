@@ -554,8 +554,10 @@ const padA = new Map<number, boolean>();
  */
 function checkJoin() {
   const pads = navigator.getGamepads?.() ?? [];
+  const anyStandard = [...pads].some((p) => p?.connected && p.mapping === 'standard');
   for (const p of pads) {
-    if (!p?.connected) continue;
+    // Only real controllers can join (not remotes or headsets).
+    if (!p?.connected || (anyStandard && p.mapping !== 'standard')) continue;
     const down = !!(p.buttons[PAD.A]?.pressed || (p.buttons[PAD.A]?.value ?? 0) > 0.5);
     const fresh = down && !padA.get(p.index);
     padA.set(p.index, down);

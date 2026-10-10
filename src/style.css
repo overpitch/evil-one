@@ -1113,3 +1113,9 @@ button.weapon-card.locked {
 #pause-screen.side-right {
   left: 50%;
 }
+
+/* Controls lists and hints follow what's being played with. */
+body.pad-mode .keys-only,
+body:not(.pad-mode) .pad-only {
+  display: none;
+}

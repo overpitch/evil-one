@@ -68,6 +68,12 @@ export class Input {
   lastPadIndex: number | null = null;
 
   private pad: Gamepad | null = null;
+  /**
+   * Per controller: which sticks have been seen centered, and which buttons
+   * released, at least once. A stick or button stuck from the moment a
+   * device appears (a faulty or odd device) is ignored until then.
+   */
+  private readonly settled = new Map<number, { axes: boolean[]; buttons: boolean[] }>();
   private padDown = new Set<number>();
   private readonly padPressed = new Set<number>();
   private axes = [0, 0, 0, 0];
@@ -139,8 +145,10 @@ export class Input {
     // Player 2 uses their own controller. Player 1 uses every other one, so
     // it doesn't matter which controller they pick up.
     const pads: Gamepad[] = [];
+    // Ignore odd devices (remotes, headsets) when a proper controller is connected.
+    const anyStandard = [...all].some((p) => p?.connected && p.mapping === 'standard');
     for (const p of all) {
-      if (!p?.connected) continue;
+      if (!p?.connected || (anyStandard && p.mapping !== 'standard')) continue;
       if (this.padIndex !== null ? p.index === this.padIndex : p.index !== this.exclude) pads.push(p);
     }
     const previous = this.padDown;
@@ -155,14 +163,20 @@ export class Input {
     }
     for (const pad of pads) {
       let used = false;
+      let settled = this.settled.get(pad.index);
+      if (!settled) this.settled.set(pad.index, (settled = { axes: [], buttons: [] }));
       pad.buttons.forEach((b, i) => {
-        if (b.pressed || b.value > 0.5) {
+        const down = b.pressed || b.value > 0.5;
+        if (!down) settled.buttons[i] = true;
+        else if (settled.buttons[i]) {
           this.padDown.add(i);
           used = true;
         }
       });
       for (let i = 0; i < 4; i++) {
-        const v = deadzone(pad.axes[i] ?? 0);
+        const raw = pad.axes[i] ?? 0;
+        if (Math.abs(raw) < 0.3) settled.axes[i] = true;
+        const v = settled.axes[i] ? deadzone(raw) : 0;
         if (Math.abs(v) > Math.abs(this.axes[i])) this.axes[i] = v;
         if (Math.abs(v) > 0.3) used = true;
       }
