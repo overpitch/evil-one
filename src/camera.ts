@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Input } from './input';
-import { heightAt } from './world';
+import { heightAt, keepCameraInCastle } from './world';
 import { clamp, smoothing } from './util';
 
 const BASE_SENSITIVITY = 0.0022; // radians per pixel of mouse/trackpad movement
@@ -63,6 +63,7 @@ export class ThirdPersonCamera {
     const shoulderPoint = this.tmp.copy(this.pivot).addScaledVector(this.right, this.shoulder);
     const cam = this.camera.position.copy(shoulderPoint).addScaledVector(this.dir, -this.distance);
     cam.y = Math.max(cam.y, heightAt(cam.x, cam.z) + 0.35);
+    keepCameraInCastle(cam, target);
 
     const shake = this.trauma * this.trauma;
     const t = this.time;

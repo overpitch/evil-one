@@ -271,7 +271,7 @@ export const TERRITORIES: TerritoryDef[] = [
     },
     arena: VAMPIRE_ARENA,
     throne: { x: -130, z: 10 },
-    gate: { id: 'castle-gate', name: 'Castle Nightspire Gate', ...around(VAMPIRE_ARENA, Math.PI / 2, VAMPIRE_ARENA.r + 7) },
+    gate: { id: 'castle-gate', name: 'Castle Nightspire Stairs', ...around(VAMPIRE_ARENA, Math.PI / 2 + 0.5, VAMPIRE_ARENA.r + 11) },
     leader: {
       id: 'vampire-lord',
       title: 'The Vampire Lord',

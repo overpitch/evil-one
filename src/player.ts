@@ -77,6 +77,8 @@ const PLAYER2_LOOK: HumanoidLook = { ...PLAYER_LOOK, shirt: 0x2a4fa3, plume: 0x3
 const HURT_COLOR = new THREE.Color(0xff2020);
 const SLOW_COLOR = new THREE.Color(0x9a4aff);
 const SLOW_FACTOR = 0.55;
+const GOO_FACTOR = 0.5;
+const GOO_COLOR = new THREE.Color(0x4adf2a);
 
 export class Player implements Target {
   readonly h: Humanoid;
@@ -101,6 +103,8 @@ export class Player implements Target {
   hurtFlash = 0;
   /** Seconds left of a witch's slowing hex. */
   slowTimer = 0;
+  /** Wading in the goo castle's goo (slow, and it burns). */
+  inGoo = false;
 
   weapon: WeaponDef = WEAPON_BY_ID[STARTING_WEAPON];
   private swings = swingsFor(this.weapon);
@@ -271,7 +275,7 @@ export class Player implements Target {
           this.stamina = Math.max(0, this.stamina - 22 * dt);
           this.staminaDelay = 0.5;
         }
-        target.copy(wish).multiplyScalar((this.blocking ? 2.2 : this.sprinting ? 8.2 : 5) * (this.slowTimer > 0 ? SLOW_FACTOR : 1));
+        target.copy(wish).multiplyScalar((this.blocking ? 2.2 : this.sprinting ? 8.2 : 5) * (this.slowTimer > 0 ? SLOW_FACTOR : 1) * (this.inGoo ? GOO_FACTOR : 1));
         if (this.rollBuffer > 0 && this.stamina >= ROLL_STAMINA) this.startRoll(wish.lengthSq() > 0 ? wish : forward);
         else if (this.attackBuffer > 0 && this.stamina > 0) this.startAttack(0);
         break;
@@ -398,6 +402,15 @@ export class Player implements Target {
       this.setState('stagger');
     }
     return 'hit';
+  }
+
+  /** Hurt by the ground itself (goo): no knockback or stagger, so the hero can still climb out. */
+  burn(amount: number, ctx: GameContext) {
+    if (!this.alive) return;
+    this.hp = Math.max(0, this.hp - amount * ctx.difficulty.enemyDamage);
+    this.sinceHurt = 0;
+    this.hurtFlash = Math.max(this.hurtFlash, 0.5);
+    if (this.hp <= 0) this.setState('dead');
   }
 
   /** A hex orb's curse: move at about half speed for a while. */
@@ -639,7 +652,8 @@ export class Player implements Target {
       }
     }
 
-    if (this.hurtFlash < 0.05 && this.slowTimer > 0) setFlash(h, SLOW_COLOR, 0.2 + 0.1 * Math.sin(this.stateTime * 8));
+    if (this.hurtFlash < 0.05 && this.inGoo) setFlash(h, GOO_COLOR, 0.25 + 0.1 * Math.sin(this.stateTime * 6));
+    else if (this.hurtFlash < 0.05 && this.slowTimer > 0) setFlash(h, SLOW_COLOR, 0.2 + 0.1 * Math.sin(this.stateTime * 8));
     else setFlash(h, HURT_COLOR, this.hurtFlash * 0.6);
   }
 

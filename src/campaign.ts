@@ -3,7 +3,7 @@ import { Banner } from './banner';
 import { EnemyGroup, type Enemy } from './enemy';
 import { createEnemy, createLeader } from './enemies';
 import type { GameContext } from './types';
-import { territoryWeight, type World } from './world';
+import { CASTLE_PLATFORM_R, inGoo, territoryWeight, type World } from './world';
 import { ARMY_LEADERS, CAMP_BANNER, TERRITORIES, type EnemyKind, type OutpostDef, type TerritoryDef, type TerritoryId } from './layout';
 import type { SaveData } from './save';
 import { OUTPOST_XP } from './progression';
@@ -16,6 +16,8 @@ const PATROL_MOVE = 25;
 const WAVE_SHARE = 0.7;
 /** Seconds between lair waves (after the war is won). */
 const LAIR_REST = 10;
+/** Damage per second from the goo castle's goo. */
+const GOO_BURN = 8;
 
 /**
  * Once the war is won, each leader's lair keeps raising its army in waves
@@ -287,6 +289,12 @@ export class Campaign {
     const player = ctx.leader;
     const heroes = ctx.players.filter((h) => h.alive);
 
+    // The goo castle: goo slows and burns.
+    for (const h of ctx.players) {
+      h.inGoo = h.alive && inGoo(h.pos.x, h.pos.z);
+      if (h.inGoo) h.burn(GOO_BURN * dt, ctx);
+    }
+
     // Touching a standing banner (either hero) makes it the checkpoint (heals, reinforces, saves).
     if (heroes.length > 0) {
       const inside = this.checkpoints.find(
@@ -348,7 +356,7 @@ export class Campaign {
     lair.group.members.slice(0, count).forEach((e, i) => {
       // They rise all around the lair; witches appear in a puff of smoke.
       const a = (i / count) * Math.PI * 2 + Math.random() * 0.5;
-      const r = arena.r * (0.45 + Math.random() * 0.3);
+      const r = t.def.id === 'vampire' ? 3 + Math.random() * (CASTLE_PLATFORM_R - 4.5) : arena.r * (0.45 + Math.random() * 0.3);
       const x = arena.x + Math.sin(a) * r;
       const z = arena.z + Math.cos(a) * r;
       const fromGround = e.faction !== 'witch';
@@ -384,7 +392,8 @@ export class Campaign {
       const dx = x - arena.x;
       const dz = z - arena.z;
       const d = Math.hypot(dx, dz);
-      const maxR = arena.r - 2.5;
+      // In the goo castle, minions appear up on the platform.
+      const maxR = t.def.id === 'vampire' ? CASTLE_PLATFORM_R - 1.5 : arena.r - 2.5;
       if (d > maxR) {
         x = arena.x + (dx / d) * maxR;
         z = arena.z + (dz / d) * maxR;

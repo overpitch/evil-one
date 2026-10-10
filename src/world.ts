@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, mulberry32, smoothing } from './util';
-import { HUMAN_CAMP, TERRITORIES, VILLAGE_RUINS, type OutpostDef, type TerritoryDef, type TerritoryId } from './layout';
+import { HUMAN_CAMP, TERRITORIES, VAMPIRE_LAND, VILLAGE_RUINS, type OutpostDef, type TerritoryDef, type TerritoryId } from './layout';
 
 export const WORLD_HALF = 150;
 
@@ -49,8 +49,76 @@ const FLAT_ZONES: [number, number, number][] = [
   ]),
 ];
 
-/** Terrain height: rolling hills, flattened around camps and arenas. */
+// ---------- The goo castle (the Vampire Lord's lair) ----------
+
+/**
+ * Castle Nightspire is full of goo. Its floor is a goo pool and its walls
+ * drip with it; the gate at ground level is gone. A long stone stair outside
+ * climbs to a bridge that crosses over the goo to a raised platform in the
+ * middle, where the Vampire Lord waits. Goo slows and burns anyone who falls in.
+ */
+const CASTLE = VAMPIRE_LAND.arena;
+/** Radius of the goo-free platform in the middle. */
+export const CASTLE_PLATFORM_R = 9;
+/** Height of the platform, bridge and the top of the stairs. */
+const CASTLE_TOP = 4.5;
+/** The bridge and stairs are this wide either side of the gate line. */
+const BRIDGE_HALF = 2;
+const STAIR_LEN = 14;
+/** How deep heroes and enemies stand in the goo. */
+const GOO_LEVEL = -0.35;
+/** The goo's surface (the ground under the castle is at 0). */
+const GOO_SURFACE = 0.08;
+const castleUx = Math.sin(CASTLE.gateAngle);
+const castleUz = Math.cos(CASTLE.gateAngle);
+
+/** Position relative to the castle: distance from the center, along the gate line, and across it. */
+function castleCoords(x: number, z: number) {
+  const dx = x - CASTLE.x;
+  const dz = z - CASTLE.z;
+  return { d: Math.hypot(dx, dz), along: dx * castleUx + dz * castleUz, across: Math.abs(-dx * castleUz + dz * castleUx) };
+}
+
+/** Walkable height of the castle's structures, or null outside them. */
+function castleHeight(x: number, z: number): number | null {
+  const { d, along, across } = castleCoords(x, z);
+  if (d > CASTLE.r + STAIR_LEN + 2) return null;
+  if (d <= CASTLE_PLATFORM_R) return CASTLE_TOP;
+  if (across <= BRIDGE_HALF && along > 0) {
+    if (along <= CASTLE.r + 0.8) return CASTLE_TOP; // the bridge, through the gap in the wall
+    const k = (along - CASTLE.r - 0.8) / STAIR_LEN;
+    if (k <= 1) return CASTLE_TOP + (terrainHeight(x, z) - CASTLE_TOP) * k; // the stairs down to the ground
+  }
+  if (d < CASTLE.r) return GOO_LEVEL;
+  return null;
+}
+
+/** Keeps a camera inside the goo castle's walls while its hero is inside (the goo ring is narrow). */
+export function keepCameraInCastle(cam: THREE.Vector3, hero: THREE.Vector3) {
+  const limit = CASTLE.r - 0.9;
+  if (Math.hypot(hero.x - CASTLE.x, hero.z - CASTLE.z) > limit) return;
+  const dx = cam.x - CASTLE.x;
+  const dz = cam.z - CASTLE.z;
+  const d = Math.hypot(dx, dz);
+  if (d <= limit) return;
+  cam.x = CASTLE.x + (dx / d) * limit;
+  cam.z = CASTLE.z + (dz / d) * limit;
+  cam.y = Math.max(cam.y, heightAt(cam.x, cam.z) + 0.35);
+}
+
+/** In the goo pool at the bottom of the castle. */
+export function inGoo(x: number, z: number) {
+  const { d, along, across } = castleCoords(x, z);
+  return d > CASTLE_PLATFORM_R + 0.3 && d < CASTLE.r && !(across <= BRIDGE_HALF && along > 0);
+}
+
+/** Height everything walks on: the terrain, or the goo castle's platform, bridge and stairs. */
 export function heightAt(x: number, z: number): number {
+  return castleHeight(x, z) ?? terrainHeight(x, z);
+}
+
+/** Terrain height: rolling hills, flattened around camps and arenas. */
+function terrainHeight(x: number, z: number): number {
   let flat = 1;
   for (const [fx, fz, r] of FLAT_ZONES) {
     const dx = x - fx;
@@ -209,6 +277,7 @@ export function createWorld(scene: THREE.Scene) {
   }
   const gates = {} as Record<TerritoryId, Gate>;
   for (const t of TERRITORIES) gates[t.id] = addArena(scene, rand, colliders, t);
+  animated.push(addGooCastle(scene, rand));
   const seal = addSeal(scene, TERRITORIES.find((t) => t.requires)!);
 
   const gloom: Record<TerritoryId, number> = { zombie: 0, witch: 0, vampire: 0, fortress: 0 };
@@ -287,7 +356,7 @@ function createGround(rand: () => number) {
   let geo: THREE.BufferGeometry = new THREE.PlaneGeometry(WORLD_HALF * 2, WORLD_HALF * 2, 150, 150);
   geo.rotateX(-Math.PI / 2);
   const p = geo.attributes.position;
-  for (let i = 0; i < p.count; i++) p.setY(i, heightAt(p.getX(i), p.getZ(i)));
+  for (let i = 0; i < p.count; i++) p.setY(i, terrainHeight(p.getX(i), p.getZ(i)));
   geo = geo.toNonIndexed(); // one color + normal per triangle = faceted low-poly look
   geo.computeVertexNormals();
 
@@ -831,7 +900,7 @@ const ARENA_STYLES: Record<TerritoryId, ArenaStyle> = {
   // Standing stones linked by bramble hedges.
   witch: { pillar: new THREE.BoxGeometry(1.2, 4.4, 0.8), pillarColor: 0x56605a, wallColor: 0x24301f, wallHeight: 1.8, barColor: 0x3a2a4a },
   // A castle courtyard: tall walls and square towers.
-  vampire: { pillar: new THREE.BoxGeometry(1.6, 5.2, 1.6), pillarColor: 0x3e3a48, wallColor: 0x4e4a58, wallHeight: 3.4, barColor: 0x1e1a22 },
+  vampire: { pillar: new THREE.BoxGeometry(1.6, 7.6, 1.6), pillarColor: 0x3e3a48, wallColor: 0x4e4a58, wallHeight: 6.4, barColor: 0x1e1a22 },
   // Black obsidian and iron.
   fortress: { pillar: new THREE.BoxGeometry(1.8, 6.5, 1.8), pillarColor: 0x1a161e, wallColor: 0x2a2630, wallHeight: 3.8, barColor: 0x6a1a2a },
 };
@@ -846,7 +915,8 @@ function addArena(scene: THREE.Scene, rand: () => number, colliders: Colliders, 
   const style = ARENA_STYLES[t.id];
   const pillarMat = lambert(style.pillarColor);
   const wallMat = lambert(style.wallColor);
-  const gateHalfAngle = 0.36;
+  // The goo castle's only way in is the bridge, so its gap is just the bridge's width.
+  const gateHalfAngle = t.id === 'vampire' ? Math.asin((BRIDGE_HALF + 0.3) / r) : 0.36;
   const inGateGap = (a: number) => Math.abs(Math.atan2(Math.sin(a - gateAngle), Math.cos(a - gateAngle))) < gateHalfAngle;
 
   // The wall: dense circle colliders around the ring, except the gate.
@@ -902,6 +972,97 @@ function addArena(scene: THREE.Scene, rand: () => number, colliders: Colliders, 
       gate.visible = false;
       for (const c of gateColliders) c.active = false;
     },
+  };
+}
+
+/** The goo pool, dripping walls, raised platform, bridge and stairs of the Vampire Lord's castle. Returns its animation. */
+function addGooCastle(scene: THREE.Scene, rand: () => number) {
+  const { x: cx, z: cz, r } = CASTLE;
+  const gooMat = new THREE.MeshLambertMaterial({ color: 0x4adf2a, emissive: 0x1a6a0a, flatShading: true });
+  const stone = lambert(0x55505c);
+  const darkStone = lambert(0x3e3a48);
+
+  // The goo pool fills the castle floor around the platform.
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(r - 0.2, 40).rotateX(-Math.PI / 2), gooMat);
+  // Its surface sits just above the ground; anyone wading in sinks up to the shins.
+  pool.position.set(cx, GOO_SURFACE, cz);
+  scene.add(pool);
+
+  // Goo running down the inside of the walls.
+  for (let i = 0; i < 30; i++) {
+    const a = (i / 30) * Math.PI * 2 + rand() * 0.1;
+    const { along, across } = castleCoords(cx + Math.sin(a) * r, cz + Math.cos(a) * r);
+    if (across < BRIDGE_HALF + 1 && along > 0) continue;
+    const h = 2.5 + rand() * 3.5;
+    const drip = new THREE.Mesh(new THREE.BoxGeometry(0.5 + rand() * 0.9, h, 0.18), gooMat);
+    drip.position.set(cx + Math.sin(a) * (r - 0.4), GOO_LEVEL + h / 2, cz + Math.cos(a) * (r - 0.4));
+    drip.rotation.y = a;
+    scene.add(drip);
+  }
+
+  // The platform: a round stone tower rising out of the goo.
+  const platform = new THREE.Mesh(new THREE.CylinderGeometry(CASTLE_PLATFORM_R, CASTLE_PLATFORM_R + 0.4, CASTLE_TOP - GOO_LEVEL, 32), darkStone);
+  platform.position.set(cx, (CASTLE_TOP + GOO_LEVEL) / 2, cz);
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(CASTLE_PLATFORM_R - 0.1, CASTLE_PLATFORM_R - 0.1, 0.06, 32), stone);
+  top.position.set(cx, CASTLE_TOP + 0.01, cz);
+  platform.castShadow = top.receiveShadow = platform.receiveShadow = true;
+  scene.add(platform, top);
+
+  // The bridge over the goo, through the wall, and the stairs down to the ground outside.
+  const yaw = Math.atan2(castleUx, castleUz);
+  const bridgeLen = r + 0.8 - CASTLE_PLATFORM_R + 0.5;
+  const bridgeMid = CASTLE_PLATFORM_R - 0.5 + bridgeLen / 2;
+  const bridge = new THREE.Mesh(new THREE.BoxGeometry(BRIDGE_HALF * 2, 0.6, bridgeLen), stone);
+  bridge.position.set(cx + castleUx * bridgeMid, CASTLE_TOP - 0.3, cz + castleUz * bridgeMid);
+  bridge.rotation.y = yaw;
+  bridge.castShadow = bridge.receiveShadow = true;
+  scene.add(bridge);
+  const steps = 18;
+  for (let i = 0; i < steps; i++) {
+    const along = r + 0.8 + ((i + 0.5) / steps) * STAIR_LEN;
+    const sx = cx + castleUx * along;
+    const sz = cz + castleUz * along;
+    const h = Math.max(0.2, heightAt(sx, sz) - terrainHeight(sx, sz)) + 0.6;
+    const step = new THREE.Mesh(new THREE.BoxGeometry(BRIDGE_HALF * 2, h, STAIR_LEN / steps + 0.02), i % 2 ? stone : darkStone);
+    step.position.set(sx, terrainHeight(sx, sz) + h / 2 - 0.6 + 0.02, sz);
+    step.rotation.y = yaw;
+    step.castShadow = step.receiveShadow = true;
+    scene.add(step);
+  }
+
+  // Close the wall up to the bridge on both sides, so the bridge is the only way in.
+  const wallMat = lambert(ARENA_STYLES.vampire.wallColor);
+  const wallH = ARENA_STYLES.vampire.wallHeight;
+  const gapHalf = Math.asin((BRIDGE_HALF + 0.3) / r);
+  for (const side of [-1, 1]) {
+    const a0 = CASTLE.gateAngle + side * gapHalf;
+    const a1 = CASTLE.gateAngle + side * ((Math.PI * 2) / 24);
+    const mid = (a0 + a1) / 2;
+    const len = 2 * r * Math.sin(Math.abs(a1 - a0) / 2) + 0.4;
+    place(scene, new THREE.BoxGeometry(len, wallH, 0.6), wallMat, cx + Math.sin(mid) * r, cz + Math.cos(mid) * r, wallH / 2 + GOO_LEVEL, mid);
+  }
+
+  // Bubbles that swell and pop on the goo.
+  const bubbleGeo = new THREE.SphereGeometry(0.35, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+  const bubbles: { mesh: THREE.Mesh; phase: number; speed: number }[] = [];
+  for (let i = 0; i < 14; i++) {
+    const a = rand() * Math.PI * 2;
+    const d = CASTLE_PLATFORM_R + 1 + rand() * (r - CASTLE_PLATFORM_R - 2);
+    const bx = cx + Math.sin(a) * d;
+    const bz = cz + Math.cos(a) * d;
+    if (!inGoo(bx, bz)) continue;
+    const mesh = new THREE.Mesh(bubbleGeo, gooMat);
+    mesh.position.set(bx, GOO_SURFACE, bz);
+    scene.add(mesh);
+    bubbles.push({ mesh, phase: rand(), speed: 0.3 + rand() * 0.4 });
+  }
+  return (time: number) => {
+    for (const b of bubbles) {
+      const k = (time * b.speed + b.phase) % 1;
+      b.mesh.scale.setScalar(0.2 + k * 1.3);
+      b.mesh.visible = k < 0.92;
+    }
+    gooMat.emissive.setRGB(0.1, 0.38 + Math.sin(time * 1.3) * 0.08, 0.04);
   };
 }
 
