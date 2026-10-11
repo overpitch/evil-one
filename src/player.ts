@@ -83,6 +83,34 @@ const SLOW_COLOR = new THREE.Color(0x9a4aff);
 const SLOW_FACTOR = 0.55;
 /** Running with the weapon on your back is quicker. */
 const SHEATHED_SPRINT = 1.15;
+
+const sheathFits = new WeakMap<THREE.Object3D, { flip: boolean; depth: number }>();
+
+/**
+ * How a weapon lies on the hero's back: how far it sticks out toward the body, and whether
+ * to turn it over so its flatter side (say, a maul's spiked top) faces the body.
+ */
+function sheathFit(model: THREE.Object3D) {
+  let fit = sheathFits.get(model);
+  if (fit) return fit;
+  const box = new THREE.Box3();
+  const part = new THREE.Box3();
+  const m = new THREE.Matrix4();
+  model.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    // The part's placement in the hand (weapon models can be scaled up).
+    m.identity();
+    for (let p: THREE.Object3D | null = o; p && p !== model.parent; p = p.parent) {
+      p.updateMatrix();
+      m.premultiply(p.matrix);
+    }
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    box.union(part.copy(o.geometry.boundingBox!).applyMatrix4(m));
+  });
+  fit = box.max.y > -box.min.y ? { flip: true, depth: -box.min.y } : { flip: false, depth: box.max.y };
+  sheathFits.set(model, fit);
+  return fit;
+}
 const GOO_FACTOR = 0.5;
 const GOO_COLOR = new THREE.Color(0x4adf2a);
 
@@ -801,11 +829,16 @@ export class Player implements Target {
 
     if (this.sheathed) {
       // On the back: the grip over the right shoulder, the blade hanging down diagonally
-      // (a second dagger crosses it from the left shoulder).
-      for (const [g, side] of [[this.hand, -1], [this.offhand, 1]] as const) {
-        g.position.set(0.2 * side, 0.62, -0.25);
+      // (a second dagger crosses it from the left shoulder). It rests outside the cape
+      // or armor, following the cape's slope, with its flatter side against the hero.
+      const back = this.cape.visible ? -0.23 : this.armorPlate.visible ? -0.19 : -0.16;
+      const tilt = this.cape.visible ? 0.12 : 0;
+      for (const [g, models, side] of [[this.hand, this.weaponModels, -1], [this.offhand, this.offhandModels, 1]] as const) {
+        const model = models.get(this.weapon.id);
+        const fit = model ? sheathFit(model) : { flip: false, depth: 0.05 };
+        g.position.set(0.2 * side, 0.62, back - 0.02 - fit.depth);
         g.rotation.order = 'ZXY';
-        g.rotation.set(Math.PI / 2, 0, -0.55 * side);
+        g.rotation.set(fit.flip ? -Math.PI / 2 + tilt : Math.PI / 2 + tilt, fit.flip ? Math.PI : 0, -0.55 * side);
       }
     }
 
