@@ -16,7 +16,24 @@ import { MenuNavigator } from './menuNav';
 import { Campaign, type Objective } from './campaign';
 import { CAMP_BANNER, FORT, TERRITORIES, type LeaderId, type ShopKind } from './layout';
 import { XP_REWARD } from './progression';
-import { ARMOR, goldFor, loadGoods, newGoods, MAX_ARMY, MAX_POTIONS, OUTPOST_GOLD, POTION_PRICE, SOLDIER_PRICE, type Goods } from './shop';
+import {
+  ARMOR,
+  CAPE_STAMINA,
+  GOLDEN_ARMOR,
+  goldFor,
+  HELMET_HEALTH,
+  loadGoods,
+  maxPotions,
+  newGoods,
+  MAX_ARMY,
+  OUTPOST_GOLD,
+  POTION_PRICE,
+  SOLDIER_PRICE,
+  UNLOCKS,
+  unlockOf,
+  type Goods,
+  type UnlockName,
+} from './shop';
 import type { ShopEntry } from './hud';
 import { COMMANDER_NAME, loadMission, missionAt, type MissionState } from './missions';
 import { createHumanoid } from './character';
@@ -827,6 +844,34 @@ function closeShop() {
 }
 hud.onShopClose = closeShop;
 
+/** How many of Commander Hale's missions are done (each unlocks something to buy). */
+function missionsDone() {
+  return mission.index;
+}
+
+/** A not-yet-unlocked item: shown greyed out with the mission that unlocks it. */
+function lockedEntry(name: UnlockName): ShopEntry {
+  const u = unlockOf(name);
+  return { label: name, sub: `Locked · unlocks after Commander Hale's mission ${u.after}`, disabled: true, onClick: () => {} };
+}
+
+/** Something Commander Hale's missions unlock: locked, for sale, or already bought. */
+function unlockable(name: UnlockName, have: boolean, what: string, give: () => void): ShopEntry {
+  const u = unlockOf(name);
+  if (missionsDone() < u.after) return lockedEntry(name);
+  const g = shopFor.goods;
+  return {
+    label: name,
+    sub: have ? `You have it · ${what}` : `${u.price} gold · ${what}`,
+    disabled: have || g.gold < u.price,
+    onClick: () => {
+      g.gold -= u.price;
+      give();
+      bought();
+    },
+  };
+}
+
 /** After buying or selling: a sound, the shop redrawn, and the hero saved. */
 function bought(sound = true) {
   if (sound) sfx.checkpoint();
@@ -849,17 +894,22 @@ function renderShop() {
   if (shopKind === 'potions') {
     entries.push({
       label: 'Healing Potion',
-      sub: `${POTION_PRICE} gold · heals half your health · you carry ${g.potions} of ${MAX_POTIONS}`,
-      disabled: g.gold < POTION_PRICE || g.potions >= MAX_POTIONS,
+      sub: `${POTION_PRICE} gold · heals half your health · you carry ${g.potions} of ${maxPotions(g)}`,
+      disabled: g.gold < POTION_PRICE || g.potions >= maxPotions(g),
       onClick: () => {
         g.gold -= POTION_PRICE;
         g.potions++;
         bought();
       },
     });
+    entries.push(unlockable('Potion Belt', g.potionBelt, 'Carry 8 potions instead of 5', () => (g.potionBelt = true)));
   } else if (shopKind === 'armory') {
     ARMOR.forEach((a, tier) => {
       if (tier === 0) return;
+      if (tier === GOLDEN_ARMOR && missionsDone() < unlockOf('Golden Armor').after) {
+        entries.push(lockedEntry('Golden Armor'));
+        return;
+      }
       const wearing = tier === g.armor;
       entries.push({
         label: a.name,
@@ -873,6 +923,18 @@ function renderShop() {
         },
       });
     });
+    entries.push(
+      unlockable('Masked Helmet', g.helmet, `A closed steel helmet with a face mask · +${HELMET_HEALTH} health`, () => {
+        g.helmet = true;
+        h.refreshStats();
+      }),
+    );
+    entries.push(
+      unlockable("Hero's Cape", g.cape, `A red cape · +${CAPE_STAMINA} stamina for more rolls and sprinting`, () => {
+        g.cape = true;
+        h.refreshStats();
+      }),
+    );
   } else if (shopKind === 'barracks') {
     const size = armySize(h);
     const full = size >= MAX_ARMY || g.soldiers >= MAX_ARMY - ARMY_SIZE;
@@ -887,10 +949,16 @@ function renderShop() {
         bought();
       },
     });
+    entries.push(
+      unlockable('Elite Soldiers', g.elite, 'Train your army: much tougher soldiers who hit harder, with gold crests', () => {
+        g.elite = true;
+        for (const a of allies) if (a.hero === h) a.heal();
+      }),
+    );
   } else {
     // The weaponsmith: buy (or buy back), trade the weapon in hand, or sell.
     const equipped = h.weapon;
-    const forSale = WEAPONS.filter((w) => !mine.has(w.id) && (w.shop || g.pawned.includes(w.id)));
+    const forSale = WEAPONS.filter((w) => !mine.has(w.id) && (w.shop || g.pawned.includes(w.id)) && missionsDone() >= (w.unlockAfter ?? 0));
     entries.push({ heading: 'Buy' });
     if (forSale.length === 0) entries.push({ label: 'Nothing left to buy', sub: 'You have every weapon here', disabled: true, onClick: () => {} });
     for (const w of forSale) {
@@ -921,6 +989,7 @@ function renderShop() {
         });
       }
     }
+    for (const w of WEAPONS) if (w.unlockAfter && missionsDone() < w.unlockAfter && !mine.has(w.id)) entries.push(lockedEntry(w.name as UnlockName));
     entries.push({ heading: 'Sell' });
     const sellable = WEAPONS.filter((w) => mine.has(w.id) && w.value > 0);
     if (sellable.length === 0) entries.push({ label: 'Nothing to sell', sub: "Your Soldier's Sword stays with you", disabled: true, onClick: () => {} });
@@ -1048,6 +1117,11 @@ function missionObjective(): Objective | null {
   return { text: `Mission: defeat ${m.foes} in ${m.place} (${mission.progress}/${m.count})`, at: new THREE.Vector3(lair.x, 0, lair.z) };
 }
 
+/** What finishing mission `index` unlocks, if anything. */
+function nextUnlock(index: number) {
+  return UNLOCKS.find((u) => u.after === index + 1)?.name;
+}
+
 /** Talking to the commander: take a mission, see how it's going, or claim the gold. */
 function renderMissions() {
   const m = missionAt(mission.index);
@@ -1057,7 +1131,7 @@ function renderMissions() {
     entries.push({ heading: `Mission ${m.index + 1}` });
     entries.push({
       label: job,
-      sub: `Reward: ${m.gold} gold${twoPlayer ? ' each' : ''} · Press to accept`,
+      sub: `Reward: ${m.gold} gold${twoPlayer ? ' each' : ''}${nextUnlock(m.index) ? ` and unlocks the ${nextUnlock(m.index)}` : ''} · Press to accept`,
       onClick: () => {
         mission = { index: m.index, active: true, progress: 0 };
         sfx.warHorn();
@@ -1081,6 +1155,8 @@ function renderMissions() {
       onClick: () => {
         for (const h of activeHeroes()) h.goods.gold += m.gold;
         mission = { index: m.index + 1, active: false, progress: 0 };
+        const unlocked = UNLOCKS.find((u) => u.after === mission.index);
+        if (unlocked) hud.announce(`New at Fort Victory: ${unlocked.name}`, `Find it at the ${unlocked.shop} in the mansion`, true);
         sfx.levelUp();
         floatText(new THREE.Vector3(shopFor.pos.x, shopFor.pos.y + 2.2, shopFor.pos.z), `+${m.gold} gold`, 'xp');
         renderShop();

@@ -551,7 +551,9 @@ export class Hud {
       card.querySelector('.weapon-from')!.textContent = w.shop
         ? have
           ? 'From Fort Victory'
-          : "Buy it at Fort Victory's weaponsmith"
+          : w.unlockAfter
+            ? `Unlocks after Commander Hale's mission ${w.unlockAfter}`
+            : "Buy it at Fort Victory's weaponsmith"
         : !w.from
           ? 'Your own blade'
           : have

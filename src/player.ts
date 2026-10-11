@@ -8,7 +8,7 @@ import { dampAngle, easeInOutQuad, easeOutCubic, lerp, smoothing, wrapAngle } fr
 import { sfx } from './audio';
 import { MAX_LEVEL, statsForLevel, xpToNext } from './progression';
 import { STARTING_WEAPON, WEAPON_BY_ID, WEAPONS, type WeaponDef, type WeaponId } from './weapons';
-import { ARMOR, MAX_POTIONS, newGoods, POTION_HEAL, type Goods } from './shop';
+import { ARMOR, CAPE_STAMINA, HELMET_HEALTH, maxPotions, newGoods, POTION_HEAL, type Goods } from './shop';
 
 type State = 'move' | 'attack' | 'roll' | 'stagger' | 'grabbed' | 'dead';
 
@@ -122,6 +122,9 @@ export class Player implements Target {
   /** Armor worn over the shirt (its color shows the kind). */
   private readonly armorPlate: THREE.Group;
   private readonly armorMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+  /** The masked helmet and the hero's cape (from Commander Hale's unlocks). */
+  private readonly helmet = new THREE.Group();
+  private readonly cape = new THREE.Group();
   /** Second weapons for the left hand (twin daggers). */
   private readonly offhandModels = new Map<WeaponId, THREE.Group>();
   private swings = swingsFor(this.weapon);
@@ -201,6 +204,29 @@ export class Player implements Target {
     this.armorPlate.visible = false;
     this.h.torso.add(this.armorPlate);
     this.h.materials.push(this.armorMat);
+    // The masked helmet: a closed steel helm with a face plate and a dark eye slit.
+    const steel = new THREE.MeshLambertMaterial({ color: 0xb8c0cc, flatShading: true });
+    const slit = new THREE.MeshBasicMaterial({ color: 0x0a0a0c });
+    const helmetPart = (w: number, ht: number, d: number, m: THREE.Material, x: number, y: number, z: number) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, ht, d), m);
+      mesh.position.set(x, y, z);
+      mesh.castShadow = true;
+      this.helmet.add(mesh);
+    };
+    helmetPart(0.46, 0.46, 0.46, steel, 0, 0.21, 0);
+    helmetPart(0.3, 0.05, 0.02, slit, 0, 0.25, 0.235);
+    helmetPart(0.05, 0.16, 0.02, slit, 0, 0.13, 0.235);
+    helmetPart(0.08, 0.2, 0.36, steel, 0, 0.5, -0.02); // crest
+    this.helmet.visible = false;
+    this.h.head.add(this.helmet);
+    // The hero's cape, hanging from the shoulders.
+    const capeCloth = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.2, 0.05).translate(0, -0.58, 0), new THREE.MeshLambertMaterial({ color: 0x8a1a22, flatShading: true }));
+    capeCloth.position.set(0, 0.62, -0.2);
+    capeCloth.rotation.x = 0.12;
+    capeCloth.castShadow = true;
+    this.cape.add(capeCloth);
+    this.cape.visible = false;
+    this.h.torso.add(this.cape);
     this.slamRing = new THREE.Mesh(
       new THREE.RingGeometry(0.8, 1, 40).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }),
@@ -221,6 +247,8 @@ export class Player implements Target {
     h.armL.add(this.offhand);
     h.torso.add(this.armorPlate);
     h.materials.push(this.armorMat);
+    h.head.add(this.helmet);
+    h.torso.add(this.cape);
     h.root.position.copy(old.root.position);
     h.root.rotation.copy(old.root.rotation);
     h.root.visible = old.root.visible;
@@ -297,7 +325,7 @@ export class Player implements Target {
   /** Drinks a healing potion, if carrying one and hurt. Returns whether it did. */
   drinkPotion(): boolean {
     if (!this.alive || this.goods.potions <= 0 || this.hp >= this.maxHp) return false;
-    this.goods.potions = Math.min(this.goods.potions, MAX_POTIONS) - 1;
+    this.goods.potions = Math.min(this.goods.potions, maxPotions(this.goods)) - 1;
     this.hp = Math.min(this.maxHp, this.hp + this.maxHp * POTION_HEAL);
     return true;
   }
@@ -307,8 +335,10 @@ export class Player implements Target {
     const armor = ARMOR[this.goods.armor] ?? ARMOR[0];
     this.armorPlate.visible = armor.health > 0;
     if (armor.health > 0) this.armorMat.color.set(armor.color);
-    this.maxHp = stats.maxHp + armor.health;
-    this.maxStamina = stats.maxStamina;
+    this.maxHp = stats.maxHp + armor.health + (this.goods.helmet ? HELMET_HEALTH : 0);
+    this.helmet.visible = this.goods.helmet;
+    this.cape.visible = this.goods.cape;
+    this.maxStamina = stats.maxStamina + (this.goods.cape ? CAPE_STAMINA : 0);
     this.damageMultiplier = stats.damageMultiplier;
   }
 

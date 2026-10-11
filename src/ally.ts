@@ -3,6 +3,7 @@ import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid } from 
 import type { Enemy } from './enemy';
 import type { GameContext, HitResult, Target } from './types';
 import type { Player } from './player';
+import { boxShape } from './shapes';
 import { heightAt, resolveColliders } from './world';
 import { clamp, dampAngle, easeOutCubic, lerp, smoothing, wrapAngle } from './util';
 import { sfx, volumeAt } from './audio';
@@ -25,6 +26,10 @@ export const ARMY_SIZE = 3;
 const ARMY_SHIRTS = [0x8a2a2a, 0x2a4a8a];
 
 const MAX_HP = 70;
+/** Elite soldiers (from the barracks, after Commander Hale's missions): tougher and harder-hitting. */
+const ELITE_HP = 130;
+const ELITE_DAMAGE = 1.6;
+const ELITE_CREST = new THREE.MeshLambertMaterial({ color: 0xffc23a, flatShading: true });
 const ENGAGE_RANGE = 14; // from the soldier
 const LEASH = 24; // from the hero
 const WINDUP = 0.4;
@@ -55,6 +60,17 @@ export class Ally implements Target {
 
   /** The hero this soldier follows (falls back to the other hero while theirs is down). */
   hero: Player | null = null;
+  /** A gold crest on the helmet marks an elite soldier. */
+  private readonly crest: THREE.Mesh;
+
+  /** Elite once their hero has trained them at the barracks. */
+  private get elite() {
+    return this.hero?.goods.elite ?? false;
+  }
+
+  private get maxHp() {
+    return this.elite ? ELITE_HP : MAX_HP;
+  }
 
   constructor(
     scene: THREE.Scene,
@@ -72,6 +88,10 @@ export class Ally implements Target {
       armor: 0x9aa3ab,
       sword: true,
     });
+    this.crest = new THREE.Mesh(boxShape(0.08, 0.2, 0.4), ELITE_CREST);
+    this.crest.position.set(0, 0.5, -0.02);
+    this.crest.visible = false;
+    this.h.head.add(this.crest);
     this.h.root.visible = false;
     scene.add(this.h.root);
   }
@@ -94,14 +114,14 @@ export class Ally implements Target {
 
   /** Patches a living soldier back up to full health. */
   heal() {
-    if (this.alive) this.hp = MAX_HP;
+    if (this.alive) this.hp = this.maxHp;
   }
 
   /** Brings the soldier (back) into the fight at full health. */
   reinforce(x: number, z: number) {
     this.pos.set(x, heightAt(x, z), z);
     this.vel.set(0, 0, 0);
-    this.hp = MAX_HP;
+    this.hp = this.maxHp;
     this.target = null;
     this.hurtFlash = 0;
     this.sinceHurt = 99;
@@ -121,6 +141,7 @@ export class Ally implements Target {
   update(dt: number, ctx: GameContext) {
     if (this.state === 'gone') return;
     this.stateTime += dt;
+    this.crest.visible = this.elite;
     const player = this.leaderOf(ctx);
 
     // Catch up if left far behind (e.g. the hero respawned).
@@ -181,7 +202,7 @@ export class Ally implements Target {
           this.struck = true;
           sfx.swing(false, volumeAt(this.pos.distanceTo(player.pos)) * 0.4);
           if (t && dist < 2.3 + t.radius && Math.abs(wrapAngle(toTargetYaw - this.yaw)) < 1.1) {
-            t.takeHit(Math.round(8 + 1.5 * player.level), new THREE.Vector3(dx / dist, 0, dz / dist), 3, false, ctx, this);
+            t.takeHit(Math.round((8 + 1.5 * player.level) * (this.elite ? ELITE_DAMAGE : 1)), new THREE.Vector3(dx / dist, 0, dz / dist), 3, false, ctx, this);
           }
         }
         if (this.stateTime >= 0.18) {
@@ -217,7 +238,7 @@ export class Ally implements Target {
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 3);
     // Soldiers patch themselves up between fights, like the hero.
     this.sinceHurt += dt;
-    if (this.alive && this.sinceHurt > ctx.difficulty.regenDelay) this.hp = Math.min(MAX_HP, this.hp + ctx.difficulty.regenRate * dt);
+    if (this.alive && this.sinceHurt > ctx.difficulty.regenDelay) this.hp = Math.min(this.maxHp, this.hp + ctx.difficulty.regenRate * dt);
     this.animate(dt);
   }
 

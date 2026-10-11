@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { boxShape } from './shapes';
 import type { LeaderId } from './layout';
 
-export type WeaponId = 'sword' | 'gravebreaker' | 'hexfire' | 'bloodfang' | 'doomblade' | 'spear' | 'daggers' | 'axe' | 'hammer';
+export type WeaponId = 'sword' | 'gravebreaker' | 'hexfire' | 'bloodfang' | 'doomblade' | 'spear' | 'daggers' | 'axe' | 'hammer' | 'flameblade';
 
 /**
  * A weapon the hero can carry. The starting sword is always owned; each
@@ -16,6 +16,8 @@ export interface WeaponDef {
   from: LeaderId | null;
   /** Sold at Fort Victory's weaponsmith. */
   shop?: boolean;
+  /** Only for sale once this many of Commander Hale's missions are done. */
+  unlockAfter?: number;
   /** Gold it costs at the weaponsmith; it sells for half. 0 = can't be sold. */
   value: number;
   /** One line about what it does, for the inventory. */
@@ -287,6 +289,31 @@ export const WEAPONS: WeaponDef[] = [
       box(g, 0.5, 0.26, 0.26, mat(0x8a8e96), 0, 0, 1.0);
       box(g, 0.08, 0.28, 0.28, mat(GOLD), 0.23, 0, 1.0);
       box(g, 0.08, 0.28, 0.28, mat(GOLD), -0.23, 0, 1.0);
+      return g;
+    },
+  },
+  {
+    id: 'flameblade',
+    name: 'Flame Blade',
+    from: null,
+    shop: true,
+    unlockAfter: 4,
+    value: 220,
+    description: 'A sword wreathed in fire. Hits hard, and every third swing bursts into flames all around you.',
+    pips: { damage: 4, speed: 3, reach: 3 },
+    swing: { damage: 1.35, dur: 0.95, reach: 0.3, arc: 0.1, knockback: 1.2, stamina: 1 },
+    special: { slam: { radius: 4, share: 0.6 } },
+    color: 0xff7a1a,
+    icon: `<g transform="rotate(45 32 32)"><path d="M28 42 L28 8 L32 1 L36 8 L36 42Z" fill="#ffb04a"/><path d="M30 40 L30 12 L32 6 L34 12 L34 40Z" fill="#fff0a0"/><path d="M25 30 Q22 20 27 12 Q27 22 29 28Z" fill="#ff5a1a"/><path d="M39 30 Q42 20 37 12 Q37 22 35 28Z" fill="#ff5a1a"/><rect x="20" y="42" width="24" height="4" fill="#3a2a2a"/><rect x="30" y="46" width="4" height="10" fill="#2a1a16"/><circle cx="32" cy="58" r="3" fill="#ff7a1a"/></g>`,
+    build() {
+      const g = new THREE.Group();
+      box(g, 0.05, 0.05, 0.24, mat(0x2a1a16), 0, 0, 0);
+      box(g, 0.34, 0.06, 0.07, mat(0x3a2a2a), 0, 0, 0.14);
+      box(g, 0.09, 0.025, 1.05, mat(0xffb04a, true), 0, 0, 0.7);
+      box(g, 0.04, 0.03, 0.95, mat(0xfff0a0, true), 0, 0, 0.68);
+      // Flames licking up the blade.
+      for (const [x, z] of [[0.07, 0.45], [-0.07, 0.75], [0.07, 1.0], [-0.06, 1.15]]) box(g, 0.05, 0.05, 0.16, mat(0xff5a1a, true), x, 0, z);
+      box(g, 0.08, 0.08, 0.07, mat(0xff7a1a, true), 0, 0, -0.14);
       return g;
     },
   },
