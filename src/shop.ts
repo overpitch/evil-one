@@ -18,6 +18,8 @@ export interface Goods {
   claimed: WeaponId[];
   /** Leaders whose pile of gold coins this hero has scooped up. */
   coins: string[];
+  /** For a Player 2 hero: the playthrough `coins` and `claimed` belong to (they reset in another one). */
+  campaign?: string;
   /** Bought after Commander Hale's missions unlock them (see UNLOCKS). */
   helmet: boolean;
   potionBelt: boolean;
@@ -41,6 +43,7 @@ export function loadGoods(raw: Partial<Goods> | undefined): Goods {
   g.pawned = Array.isArray(raw.pawned) ? (raw.pawned.filter((w) => typeof w === 'string') as WeaponId[]) : [];
   g.claimed = Array.isArray(raw.claimed) ? (raw.claimed.filter((w) => typeof w === 'string') as WeaponId[]) : [];
   g.coins = Array.isArray(raw.coins) ? raw.coins.filter((id) => typeof id === 'string') : [];
+  if (typeof raw.campaign === 'string') g.campaign = raw.campaign;
   g.helmet = raw.helmet === true;
   g.potionBelt = raw.potionBelt === true;
   g.cape = raw.cape === true;

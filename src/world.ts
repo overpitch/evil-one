@@ -389,9 +389,9 @@ export function createWorld(scene: THREE.Scene) {
   animated.push(addGooCastle(scene, rand));
   // The castle's stonework and goo don't move (only its bubbles do).
   for (const o of scene.children.slice(beforeCastle)) if (o instanceof THREE.Mesh && !o.userData.bubble) o.userData.mergeable = true;
+  addDreadManor(scene, colliders, TERRITORIES.find((t) => t.requires)!);
   mergeStaticScenery(scene);
   const seal = addSeal(scene, TERRITORIES.find((t) => t.requires)!);
-  addDreadManor(scene, colliders, TERRITORIES.find((t) => t.requires)!);
 
   const gloom: Record<TerritoryId, number> = { zombie: 0, witch: 0, vampire: 0, fortress: 0 };
   let time = 0;
@@ -985,7 +985,7 @@ export function inMansion(x: number, z: number, margin = 0) {
 
 /** Keeps a camera inside the mansion (and under its ceiling) while its hero is inside. */
 function keepCameraInMansion(cam: THREE.Vector3, hero: THREE.Vector3) {
-  if (!inMansion(hero.x, hero.z)) return;
+  if (!inMansion(hero.x, hero.z, 1.6)) return;
   const b = MANSION_BOUNDS;
   const p = fortLocal(cam.x, cam.z);
   const m = 0.6;
@@ -1449,8 +1449,10 @@ function addGooCastle(scene: THREE.Scene, rand: () => number) {
 function addArenaLandmark(scene: THREE.Scene, colliders: Colliders, t: TerritoryDef) {
   const { x: ax, z: az, r, gateAngle } = t.arena;
   const back = gateAngle + Math.PI;
-  const bx = ax + dirX(back) * (r + 4.5);
-  const bz = az + dirZ(back) * (r + 4.5);
+  // (Zomawi's spire stands just behind his Dread Manor.)
+  const behind = t.id === 'fortress' ? r + 7.5 : r + 4.5;
+  const bx = ax + dirX(back) * behind;
+  const bz = az + dirZ(back) * behind;
   // Its front faces the arena center.
   const facing = gateAngle - Math.PI;
   const sideways = Math.abs(Math.sin(facing)) > 0.5;
@@ -1537,7 +1539,7 @@ function addArenaLandmark(scene: THREE.Scene, colliders: Colliders, t: Territory
     // ...and watchtowers flanking the arena.
     const towerMat = lambert(0x2a2630);
     for (const side of [-1, 1]) {
-      const wx = ax + side * (r + 5);
+      const wx = ax + side * (r + 8); // outside the Dread Manor's side walls
       const wz = az + 4;
       place(scene, new THREE.CylinderGeometry(2.2, 2.6, 14, 8).translate(0, 7, 0), towerMat, wx, wz);
       place(scene, new THREE.ConeGeometry(2.8, 4, 8).translate(0, 2, 0), lambert(0x3a0a12), wx, wz, 14);
@@ -1608,7 +1610,7 @@ function addDreadManor(scene: THREE.Scene, colliders: Colliders, t: TerritoryDef
     for (let i = 0; i < n; i++) {
       const x = x0 + ((x1 - x0) * (i + 0.5)) / n;
       const z = z0 + ((z1 - z0) * (i + 0.5)) / n;
-      piece(new THREE.BoxGeometry(len / n + 0.1, height + 3, 0.8), stone, x, height / 2 - 1.5, z, yaw);
+      piece(new THREE.BoxGeometry(len / n + 0.1, height + 3, 0.8), stone, x, height / 2 - 1.5, z, yaw, false);
     }
     for (let i = 0; i <= Math.ceil(len / 0.6); i++) {
       const k = i / Math.ceil(len / 0.6);

@@ -42,7 +42,7 @@ import { DEFAULT_OUTFIT, loadOutfit, type Outfit } from './outfit';
 import { CoinPiles, WeaponDrops } from './loot';
 import { isWeaponId, STARTING_WEAPON, WEAPONS, weaponOf, type WeaponDef, type WeaponId } from './weapons';
 import { DIFFICULTIES, IS_XBOX, loadSettings, saveSettings, type Settings } from './settings';
-import { loadSave, newSave, useTestSaveSlot, writeSave, type SaveData } from './save';
+import { loadSave, newCampaignId, newSave, useTestSaveSlot, writeSave, type SaveData } from './save';
 import { loadHeroes, newHero, saveHero, useTestHeroList, type Player2Hero } from './heroes';
 import type { MapData } from './map';
 import type { GameContext } from './types';
@@ -321,7 +321,7 @@ function saveP2() {
 function becomeHero(hero: Player2Hero) {
   p2Hero = hero;
   choosingP2 = false;
-  player2.goods = goodsFrom(hero.goods, hero.weapons, campaign.leaders);
+  player2.goods = goodsFrom(hero.goods, hero.weapons, campaign.leaders, true);
   player2.setOutfit(loadOutfit(hero.outfit ?? P2_OUTFIT));
   player2.loadHero(hero.name, hero.level, hero.xp);
   owned2.clear();
@@ -405,13 +405,25 @@ function needsDrop(h: Player, id: WeaponId) {
 }
 
 /** A hero's goods from a save. Older saves: any leader weapons they have count as picked up. */
-function goodsFrom(raw: Partial<Goods> | undefined, weapons: readonly string[], leaders: Iterable<string>): Goods {
+function goodsFrom(raw: Partial<Goods> | undefined, weapons: readonly string[], leaders: Iterable<string>, playerTwo = false): Goods {
   const goods = loadGoods(raw);
   if (!raw) goods.claimed = weapons.filter((id): id is WeaponId => isWeaponId(id) && WEAPONS.some((w) => w.id === id && w.from !== null));
-  // Saves from before coin piles: leaders beaten then already paid out their gold.
-  if (!raw?.coins) goods.coins = [...leaders];
+  if (playerTwo) {
+    // A Player 2 hero joining a different playthrough collects that one's leader gold (and weapons) afresh.
+    if (goods.campaign !== campaignId) {
+      goods.coins = [];
+      goods.claimed = [];
+      goods.campaign = campaignId;
+    }
+  } else if (!raw?.coins) {
+    // Saves from before coin piles: leaders beaten then already paid out their gold.
+    goods.coins = [...leaders];
+  }
   return goods;
 }
+
+/** This playthrough's name (from the save). */
+let campaignId = '';
 
 /** Puts each beaten leader's weapon back in its lair until every hero playing has their own. */
 function placeMissingDrops(leaders: Iterable<string>) {
@@ -431,6 +443,12 @@ function loadWeapons(save: SaveData | null) {
   const claimed = save?.weapons ?? leaders.map((id) => weaponOf(id)?.id);
   for (const id of claimed) if (isWeaponId(id)) owned.add(id);
   player.setWeapon(isWeaponId(save?.weapon) && owned.has(save.weapon) ? save.weapon : STARTING_WEAPON);
+  // Older saves get a playthrough name now (kept from here on).
+  if (save && !save.campaignId) {
+    save.campaignId = newCampaignId();
+    writeSave(save);
+  }
+  campaignId = save?.campaignId ?? '';
   player.goods = goodsFrom(save?.goods, [...owned], save?.leaders ?? []);
   player.refreshStats();
   if (save?.outfit || player.outfit !== DEFAULT_OUTFIT) player.setOutfit(loadOutfit(save?.outfit));
@@ -449,7 +467,7 @@ const inputOf = (h: Player) => (h === player2 ? input2 : input);
 
 function renderInventory() {
   const chooser = twoPlayer ? inventoryFor.name : undefined;
-  hud.renderInventory(ownedBy(inventoryFor), inventoryFor.weapon.id, inputOf(inventoryFor).mode === 'gamepad', chooser);
+  hud.renderInventory(ownedBy(inventoryFor), inventoryFor.weapon.id, inputOf(inventoryFor).mode === 'gamepad', chooser, missionsDone());
 }
 
 function equip(w: WeaponDef, announce: boolean, hero: Player = player) {
@@ -542,7 +560,7 @@ function enterWorld(save: SaveData) {
     const saved = p2Hero && loadHeroes().find((h) => h.id === p2Hero!.id);
     if (saved) {
       p2Hero = saved;
-      player2.goods = goodsFrom(saved.goods, saved.weapons, campaign.leaders);
+      player2.goods = goodsFrom(saved.goods, saved.weapons, campaign.leaders, true);
       player2.loadHero(saved.name, saved.level, saved.xp);
     }
     if (!owned2.has(player2.weapon.id)) player2.setWeapon(STARTING_WEAPON);
@@ -762,7 +780,7 @@ let returnSpot: { x: number; z: number; yaw: number } | null = null;
 function teleportTeam(x: number, z: number, yaw: number) {
   ctx.players.forEach((h, i) => {
     if (!h.alive) return;
-    h.teleport(x - Math.cos(yaw) * 1.6 * i, z + Math.sin(yaw) * 1.6 * i, yaw);
+    h.teleport(x - Math.sin(yaw) * 1.6 * i, z - Math.cos(yaw) * 1.6 * i, yaw);
     (h === player ? camCtrl : camCtrl2).yaw = yaw;
   });
   const slot = new THREE.Vector3();
@@ -906,7 +924,7 @@ function renderShop() {
   } else if (shopKind === 'armory') {
     ARMOR.forEach((a, tier) => {
       if (tier === 0) return;
-      if (tier === GOLDEN_ARMOR && missionsDone() < unlockOf('Golden Armor').after) {
+      if (tier === GOLDEN_ARMOR && missionsDone() < unlockOf('Golden Armor').after && g.armor < GOLDEN_ARMOR) {
         entries.push(lockedEntry('Golden Armor'));
         return;
       }
@@ -1099,11 +1117,13 @@ function countForMission(z: Enemy) {
   const m = missionAt(mission.index);
   const lair = campaign.territories.find((t) => t.def.id === m.lair)?.lair.group;
   if (!lair || z.group !== lair) return;
-  mission.progress = Math.min(m.count, mission.progress + 1);
+  if (mission.progress >= m.count) return; // already done: just go back to the commander
+  mission.progress++;
   if (mission.progress === m.count) {
     sfx.victoryHorn();
     hud.announce('Mission complete!', `Return to ${COMMANDER_NAME} at Fort Victory for ${m.gold} gold`, true);
   }
+  saveWeapons(); // progress isn't lost if the game is closed
 }
 
 function missionObjective(): Objective | null {

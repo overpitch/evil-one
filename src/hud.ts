@@ -538,7 +538,7 @@ export class Hud {
   }
 
   /** Fills in the inventory cards: what's owned, what's still to win, and what's in hand. */
-  renderInventory(owned: ReadonlySet<WeaponId>, equipped: WeaponId, usingPad: boolean, chooser?: string) {
+  renderInventory(owned: ReadonlySet<WeaponId>, equipped: WeaponId, usingPad: boolean, chooser?: string, missionsDone = 0) {
     this.inventory.querySelector('.subtitle')!.textContent = chooser
       ? `Choosing ${chooser}'s weapon. Each leader you defeat drops a new one.`
       : 'Choose your weapon. Each leader you defeat drops a new one.';
@@ -551,7 +551,7 @@ export class Hud {
       card.querySelector('.weapon-from')!.textContent = w.shop
         ? have
           ? 'From Fort Victory'
-          : w.unlockAfter
+          : w.unlockAfter && missionsDone < w.unlockAfter
             ? `Unlocks after Commander Hale's mission ${w.unlockAfter}`
             : "Buy it at Fort Victory's weaponsmith"
         : !w.from

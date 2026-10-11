@@ -17,6 +17,8 @@ export interface SaveData {
   weapon?: string;
   /** Player 2's own weapons, kept between visits. */
   player2?: { weapons: string[]; weapon: string };
+  /** Which playthrough this is (new games get a new one). */
+  campaignId?: string;
   /** Commander Hale's missions (after the war). */
   mission?: Partial<import('./missions').MissionState>;
   /** False between Zomawi's fall and the ending playing. */
@@ -38,7 +40,12 @@ export function useTestSaveSlot() {
 }
 
 export function newSave(name: string): SaveData {
-  return { version: 1, name, level: 1, xp: 0, kills: 0, checkpoint: 'camp', captured: [], leaders: [], weapons: ['sword'], weapon: 'sword', savedAt: Date.now() };
+  return { version: 1, name, level: 1, xp: 0, kills: 0, checkpoint: 'camp', captured: [], leaders: [], weapons: ['sword'], weapon: 'sword', campaignId: newCampaignId(), savedAt: Date.now() };
+}
+
+/** A name for one playthrough (Player 2 heroes keep which leaders' gold they collected per playthrough). */
+export function newCampaignId() {
+  return `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
 export function loadSave(): SaveData | null {
