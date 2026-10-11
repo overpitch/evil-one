@@ -948,7 +948,7 @@ function addOutpostDecor(scene: THREE.Scene, rand: () => number, colliders: Coll
 // ---------- Fort Victory ----------
 
 /** Canopy color and shopkeeper for each stall. */
-const STALL_LOOKS: Record<ShopKind, { canopy: number; keeper: HumanoidLook }> = {
+const STALL_LOOKS: Record<Exclude<ShopKind, 'missions'>, { canopy: number; keeper: HumanoidLook }> = {
   potions: { canopy: 0xb02a4a, keeper: { skin: 0xe8c39a, shirt: 0x6a2a8a, pants: 0x3a2a4a, boots: 0x2a1e16, eyes: 0x222222, belt: 0xd9b24a } },
   armory: { canopy: 0x6a7480, keeper: { skin: 0xc68e64, shirt: 0x4a4440, pants: 0x2e2a26, boots: 0x1e1814, eyes: 0x222222, belt: 0x5a3c22, armor: 0x9aa3ab } },
   weapons: { canopy: 0xc0702a, keeper: { skin: 0x8d5a3b, shirt: 0x5a3a2a, pants: 0x3a2e26, boots: 0x221c18, eyes: 0x222222, belt: 0x2a2018 } },

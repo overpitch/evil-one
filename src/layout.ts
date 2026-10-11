@@ -20,7 +20,8 @@ export interface Spot {
 export const HUMAN_CAMP = { x: 0, z: 0 };
 export const CAMP_BANNER = { id: 'camp', name: 'Human Camp', x: 3, z: -9 };
 
-export type ShopKind = 'potions' | 'armory' | 'weapons' | 'barracks';
+/** A Fort Victory shop, or Commander Hale's missions (after the war). */
+export type ShopKind = 'potions' | 'armory' | 'weapons' | 'barracks' | 'missions';
 
 /**
  * Fort Victory: the heroes' base, on a big hill in the empty northeast.
@@ -44,7 +45,7 @@ export const FORT = (() => {
    * 1 right), its counter facing the red carpet down the middle. `angle` turns
    * the stall so its back is to the wall; `front` is where a customer stands.
    */
-  const stall = (kind: ShopKind, name: string, side: number, forward: number) => {
+  const stall = (kind: Exclude<ShopKind, 'missions'>, name: string, side: number, forward: number) => {
     const wallward = { x: Math.cos(gateAngle) * side, z: -Math.sin(gateAngle) * side };
     return {
       kind,
@@ -76,6 +77,12 @@ export const FORT = (() => {
     banner: { id: 'fort', name: 'Fort Victory', ...at(gateAngle + Math.PI, 10) },
     /** Where Go to Fort Victory lands: inside the hall, near the door. */
     arrival: at(gateAngle + Math.PI, 4.8),
+    /**
+     * Commander Hale (after the war) stands in the courtyard in front of the
+     * mansion, facing the gate. Heroes talk to him at `talk`, and arrive at
+     * `meet` (facing him) once Zomawi falls.
+     */
+    commander: { ...local(0, 5), talk: local(0, 6.8), meet: local(0, 9) },
     // The four shops stand in the mansion's great hall.
     stalls: [
       stall('potions', 'Potion Shop', -1, -10.2),

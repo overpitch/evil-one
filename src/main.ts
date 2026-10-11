@@ -18,6 +18,9 @@ import { CAMP_BANNER, FORT, TERRITORIES, type LeaderId, type ShopKind } from './
 import { XP_REWARD } from './progression';
 import { ARMOR, goldFor, loadGoods, newGoods, MAX_ARMY, MAX_POTIONS, OUTPOST_GOLD, POTION_PRICE, SOLDIER_PRICE, type Goods } from './shop';
 import type { ShopEntry } from './hud';
+import { COMMANDER_NAME, loadMission, missionAt, type MissionState } from './missions';
+import { createHumanoid } from './character';
+import { addCape } from './vampires';
 import { DEFAULT_OUTFIT, loadOutfit, type Outfit } from './outfit';
 import { CoinPiles, WeaponDrops } from './loot';
 import { isWeaponId, STARTING_WEAPON, WEAPONS, weaponOf, type WeaponDef, type WeaponId } from './weapons';
@@ -163,6 +166,7 @@ const ctx: GameContext = {
   onEnemyKilled: (z) => {
     if (z.xpReward === 0) return; // the Witch Queen's mirror images don't count
     kills++;
+    countForMission(z);
     if (z.isBoss) {
       // Leaders drop a pile of coins to scoop up (see leaderDefeated).
       floatText(new THREE.Vector3(z.pos.x, z.pos.y + 2.2, z.pos.z), `+${z.xpReward} XP`, 'xp');
@@ -265,6 +269,7 @@ function saveGame() {
     goods: player.goods,
     outfit: player.outfit,
     endingSeen,
+    mission,
     ...campaign.saveFields(),
     savedAt: Date.now(),
   });
@@ -277,7 +282,7 @@ function saveGame() {
  */
 function saveWeapons() {
   const save = loadSave();
-  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id, goods: player.goods, outfit: player.outfit });
+  if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id, goods: player.goods, outfit: player.outfit, mission });
   saveP2();
 }
 
@@ -511,6 +516,7 @@ function enterWorld(save: SaveData) {
   kills = save.kills;
   playTime = save.playTime ?? 0;
   endingSeen = save.endingSeen ?? true;
+  mission = loadMission(save.mission);
   endingShown = false;
   campaign.load(save);
   const spot = respawnPoint(campaign.current.banner);
@@ -788,6 +794,8 @@ function stallAt(h: Player): ShopKind | null {
   for (const st of FORT.stalls) {
     if (Math.hypot(h.pos.x - st.front.x, h.pos.z - st.front.z) < 1.5) return st.kind;
   }
+  const c = FORT.commander.talk;
+  if (campaign.victorious && Math.hypot(h.pos.x - c.x, h.pos.z - c.z) < 1.8) return 'missions';
   return null;
 }
 
@@ -828,6 +836,10 @@ function bought(sound = true) {
 
 function renderShop() {
   if (!shopKind) return;
+  if (shopKind === 'missions') {
+    renderMissions();
+    return;
+  }
   const h = shopFor;
   const g = h.goods;
   const mine = ownedBy(h);
@@ -991,6 +1003,95 @@ function updateOutfitCamera(dt: number) {
   camera.lookAt(p.x - fz * 1.5, p.y + 1.1, p.z + fx * 1.5);
 }
 
+// ---------- Commander Hale's missions (after the war) ----------
+
+let mission: MissionState = loadMission(undefined);
+
+/** Commander Hale, in the fort's courtyard: gleaming armor and a gold cape. Only there once the war is won. */
+const commander = createHumanoid({ skin: 0xc68e64, shirt: 0x2a3f8a, pants: 0x2e3442, boots: 0x2a1e16, eyes: 0x222222, belt: 0xd9b24a, armor: 0xe0c060, plume: 0xffffff, sword: true });
+addCape(commander, 0xd9b24a);
+commander.root.position.set(FORT.commander.x, heightAt(FORT.commander.x, FORT.commander.z), FORT.commander.z);
+commander.root.rotation.y = FORT.gateAngle;
+commander.armR.rotation.x = -0.3;
+commander.root.visible = false;
+scene.add(commander.root);
+const commanderCollider = { x: FORT.commander.x, z: FORT.commander.z, r: 0.5, active: false };
+world.colliders.circles.push(commanderCollider);
+
+function updateCommander() {
+  const here = campaign.victorious;
+  commander.root.visible = here;
+  commanderCollider.active = here;
+}
+
+/** A kill in the current mission's lair counts toward it. */
+function countForMission(z: Enemy) {
+  if (!mission.active || !campaign.victorious) return;
+  const m = missionAt(mission.index);
+  const lair = campaign.territories.find((t) => t.def.id === m.lair)?.lair.group;
+  if (!lair || z.group !== lair) return;
+  mission.progress = Math.min(m.count, mission.progress + 1);
+  if (mission.progress === m.count) {
+    sfx.victoryHorn();
+    hud.announce('Mission complete!', `Return to ${COMMANDER_NAME} at Fort Victory for ${m.gold} gold`, true);
+  }
+}
+
+function missionObjective(): Objective | null {
+  if (!campaign.victorious || campaign.activeFight) return null;
+  const m = missionAt(mission.index);
+  const c = FORT.commander;
+  const atCommander = new THREE.Vector3(c.x, heightAt(c.x, c.z), c.z);
+  if (!mission.active) return { text: `Talk to ${COMMANDER_NAME} at Fort Victory for a mission`, at: atCommander };
+  if (mission.progress >= m.count) return { text: `Mission complete · Return to ${COMMANDER_NAME} for ${m.gold} gold`, at: atCommander };
+  const lair = campaign.territories.find((t) => t.def.id === m.lair)!.def.arena;
+  return { text: `Mission: defeat ${m.foes} in ${m.place} (${mission.progress}/${m.count})`, at: new THREE.Vector3(lair.x, 0, lair.z) };
+}
+
+/** Talking to the commander: take a mission, see how it's going, or claim the gold. */
+function renderMissions() {
+  const m = missionAt(mission.index);
+  const entries: ShopEntry[] = [];
+  const job = `Defeat ${m.count} ${m.foes} in ${m.place}`;
+  if (!mission.active) {
+    entries.push({ heading: `Mission ${m.index + 1}` });
+    entries.push({
+      label: job,
+      sub: `Reward: ${m.gold} gold${twoPlayer ? ' each' : ''} · Press to accept`,
+      onClick: () => {
+        mission = { index: m.index, active: true, progress: 0 };
+        sfx.warHorn();
+        renderShop();
+        saveWeapons();
+      },
+    });
+  } else if (mission.progress < m.count) {
+    entries.push({ heading: `Mission ${m.index + 1}` });
+    entries.push({
+      label: job,
+      sub: `${mission.progress} of ${m.count} done · Reward: ${m.gold} gold · Pause → Go to Fort Victory brings you back`,
+      disabled: true,
+      onClick: () => {},
+    });
+  } else {
+    entries.push({ heading: 'Well done, soldier!' });
+    entries.push({
+      label: `Claim your reward: ${m.gold} gold${twoPlayer ? ' each' : ''}`,
+      sub: job,
+      onClick: () => {
+        for (const h of activeHeroes()) h.goods.gold += m.gold;
+        mission = { index: m.index + 1, active: false, progress: 0 };
+        sfx.levelUp();
+        floatText(new THREE.Vector3(shopFor.pos.x, shopFor.pos.y + 2.2, shopFor.pos.z), `+${m.gold} gold`, 'xp');
+        renderShop();
+        saveWeapons();
+      },
+    });
+  }
+  const sub = `${twoPlayer ? `${shopFor.name} has` : 'You have'} ${shopFor.goods.gold} gold`;
+  hud.renderShop(COMMANDER_NAME, sub, entries, inputOf(shopFor).mode === 'gamepad');
+}
+
 // ---------- Menu flow: title → (name → intro | continue) → play ----------
 
 /** Grabs the pointer. If the browser refuses, the pause screen offers a Resume button. */
@@ -1089,7 +1190,18 @@ function showEnding() {
 hud.onKeepExploring = () => {
   endingShown = false;
   hud.showScreen('none');
-  hud.announce('The lairs still stir', "Enemies keep rising in the four leaders' lairs");
+  // Zomawi's Doomblade and gold come along (no walking back to the fortress for them).
+  const doomblade = WEAPONS.find((w) => w.from === 'zomawi')!;
+  for (const h of activeHeroes()) {
+    if (needsDrop(h, doomblade.id)) claimWeapon(doomblade, h);
+    if (needsCoins(h, 'zomawi')) collectCoins('zomawi', h);
+  }
+  // Straight to Commander Hale at Fort Victory, facing him.
+  const meet = FORT.commander.meet;
+  teleportTeam(meet.x, meet.z, FORT.gateAngle + Math.PI);
+  returnSpot = null;
+  hud.setGoBackAvailable(false);
+  hud.announce(COMMANDER_NAME, 'The lairs still stir. Walk up to him for a mission and earn gold');
   lockPointer();
 };
 /** Back to the title screen (progress since the last checkpoint is dropped; the save stays). */
@@ -1273,6 +1385,7 @@ function tick(realDt: number) {
       if (twoPlayer) player2.update(dt, ctx, in2, camCtrl2.yaw);
       updateRevives();
       updateShopTriggers();
+      updateCommander();
       for (const a of allies) a.update(dt, ctx);
       updateEnemies(dt);
       separateBodies();
@@ -1306,7 +1419,7 @@ function tick(realDt: number) {
     }
 
     const lead = ctx.leader;
-    const objective = weaponObjective() ?? campaign.objective(lead.pos, player.level);
+    const objective = weaponObjective() ?? missionObjective() ?? campaign.objective(lead.pos, player.level);
     hud.setObjective(objective.text);
     hud.views[0].setMarker(objective.at, camera, player.pos);
     if (twoPlayer) hud.views[1].setMarker(objective.at, camera2, player2.pos);
