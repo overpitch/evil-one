@@ -35,7 +35,7 @@ import {
   type UnlockName,
 } from './shop';
 import type { ShopEntry } from './hud';
-import { COMMANDER_NAME, loadMission, missionAt, PROMOTION_AFTER, type MissionState } from './missions';
+import { COMMANDER_NAME, loadMission, missionAt, type MissionState } from './missions';
 import { createHumanoid } from './character';
 import { addCape } from './vampires';
 import { DEFAULT_OUTFIT, loadOutfit, type Outfit } from './outfit';
@@ -1159,7 +1159,7 @@ function renderMissions() {
     entries.push({ heading: `Mission ${m.index + 1}` });
     entries.push({
       label: job,
-      sub: `Reward: ${m.gold} gold${twoPlayer ? ' each' : ''}${nextUnlock(m.index) ? ` and unlocks the ${nextUnlock(m.index)}` : ''}${m.index + 1 === PROMOTION_AFTER ? ' and promotes you to Commander!' : ''} · Press to accept`,
+      sub: `Reward: ${m.gold} gold${twoPlayer ? ' each' : ''}${nextUnlock(m.index) ? ` and unlocks the ${nextUnlock(m.index)}` : ''} · Press to accept`,
       onClick: () => {
         mission = { index: m.index, active: true, progress: 0 };
         sfx.warHorn();
@@ -1185,10 +1185,6 @@ function renderMissions() {
         mission = { index: m.index + 1, active: false, progress: 0 };
         const unlocked = UNLOCKS.find((u) => u.after === mission.index);
         if (unlocked) hud.announce(`New at Fort Victory: ${unlocked.name}`, `Find it at the ${unlocked.shop} in the mansion`, true);
-        if (mission.index === PROMOTION_AFTER) {
-          sfx.victoryHorn();
-          hud.announce('You are now a Commander!', 'Give your army orders from the pause menu', true);
-        }
         sfx.levelUp();
         floatText(new THREE.Vector3(shopFor.pos.x, shopFor.pos.y + 2.2, shopFor.pos.z), `+${m.gold} gold`, 'xp');
         renderShop();
@@ -1202,9 +1198,9 @@ function renderMissions() {
 
 // ---------- A commander's army orders ----------
 
-/** Promoted after Commander Hale's tenth mission (both heroes, in two-player). */
+/** Beating Zomawi makes the heroes Commanders (both, in two-player). */
 function isCommander() {
-  return mission.index >= PROMOTION_AFTER;
+  return campaign.victorious;
 }
 
 const ORDERS: { order: ArmyOrder; name: string; what: string }[] = [
@@ -1364,6 +1360,7 @@ hud.onKeepExploring = () => {
   teleportTeam(meet.x, meet.z, FORT.gateAngle + Math.PI);
   returnSpot = null;
   hud.setGoBackAvailable(false);
+  hud.announce('You are now a Commander!', 'Give your army orders from the pause menu', true);
   hud.announce(COMMANDER_NAME, 'The lairs still stir. Walk up to him for a mission and earn gold');
   lockPointer();
 };
