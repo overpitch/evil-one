@@ -391,6 +391,7 @@ export function createWorld(scene: THREE.Scene) {
   for (const o of scene.children.slice(beforeCastle)) if (o instanceof THREE.Mesh && !o.userData.bubble) o.userData.mergeable = true;
   mergeStaticScenery(scene);
   const seal = addSeal(scene, TERRITORIES.find((t) => t.requires)!);
+  addDreadManor(scene, colliders, TERRITORIES.find((t) => t.requires)!);
 
   const gloom: Record<TerritoryId, number> = { zombie: 0, witch: 0, vampire: 0, fortress: 0 };
   let time = 0;
@@ -1569,6 +1570,121 @@ function addArenaLandmark(scene: THREE.Scene, colliders: Colliders, t: Territory
   }
   group.traverse((o) => (o.castShadow = true));
   scene.add(group);
+}
+
+/**
+ * Zomawi's Dread Manor: a giant dark mansion built around his arena, so the
+ * final fight happens in its great hall. Glowing purple and green windows,
+ * a slate roof with his spire rising behind, big front doors facing the
+ * courtyard, and inside a marble floor, a red carpet to the throne,
+ * chandeliers and banners. (Its gate side is +Z.)
+ */
+function addDreadManor(scene: THREE.Scene, colliders: Colliders, t: TerritoryDef) {
+  const { x: ax, z: az } = t.arena;
+  const half = 19.5; // half the width
+  const front = 18; // front wall, toward the courtyard
+  const back = 19; // back wall
+  const height = 12;
+  const doorHalf = 5;
+  const stone = lambert(0x2a2630);
+  const trim = lambert(0x6a1a2a);
+  const slate = lambert(0x1a141e);
+  const glowPurple = new THREE.MeshBasicMaterial({ color: 0xb04aff });
+  const glowGreen = new THREE.MeshBasicMaterial({ color: 0x7aff5a });
+  const piece = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, rotY = 0, ground = true) => {
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(ax + x, (ground ? heightAt(ax + x, az + z) : heightAt(ax, az)) + y, az + z);
+    mesh.rotation.y = rotY;
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.userData.mergeable = true;
+    scene.add(mesh);
+    return mesh;
+  };
+  // Walls in 4 m sections, each set on its own ground (the hill isn't perfectly flat) and sunk a little.
+  const wall = (x0: number, z0: number, x1: number, z1: number) => {
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    const n = Math.max(1, Math.round(len / 4));
+    const yaw = Math.atan2(x1 - x0, z1 - z0) + Math.PI / 2;
+    for (let i = 0; i < n; i++) {
+      const x = x0 + ((x1 - x0) * (i + 0.5)) / n;
+      const z = z0 + ((z1 - z0) * (i + 0.5)) / n;
+      piece(new THREE.BoxGeometry(len / n + 0.1, height + 3, 0.8), stone, x, height / 2 - 1.5, z, yaw);
+    }
+    for (let i = 0; i <= Math.ceil(len / 0.6); i++) {
+      const k = i / Math.ceil(len / 0.6);
+      colliders.circles.push({ x: ax + x0 + (x1 - x0) * k, z: az + z0 + (z1 - z0) * k, r: 0.5 });
+    }
+  };
+  wall(-half, -back, half, -back);
+  wall(-half, -back, -half, front);
+  wall(half, -back, half, front);
+  wall(-half, front, -doorHalf, front);
+  wall(doorHalf, front, half, front);
+  // Above the doors, and the gold door frame.
+  piece(new THREE.BoxGeometry(doorHalf * 2 + 0.2, height - 8, 0.8), stone, 0, 8 + (height - 8) / 2, front, 0, false);
+  const gold = lambert(0xd9b24a);
+  for (const side of [-1, 1]) piece(new THREE.BoxGeometry(0.5, 8, 1), gold, side * doorHalf, 4, front, 0, false);
+  piece(new THREE.BoxGeometry(doorHalf * 2 + 1, 0.5, 1), gold, 0, 8, front, 0, false);
+
+  // Trim between the floors and along the top.
+  for (const y of [5.5, height]) {
+    piece(new THREE.BoxGeometry(half * 2 + 0.4, 0.4, 1), trim, 0, y, -back, 0, false);
+    for (const side of [-1, 1]) {
+      piece(new THREE.BoxGeometry(1, 0.4, front + back + 0.4), trim, side * half, y, (front - back) / 2, 0, false);
+      piece(new THREE.BoxGeometry(half - doorHalf, 0.4, 1), trim, side * (doorHalf + (half - doorHalf) / 2), y, front, 0, false);
+    }
+  }
+
+  // Two floors of glowing windows on every side, purple and green (seen inside and out).
+  for (const [y, i0] of [[3, 0], [8.5, 1]] as const) {
+    let i = i0;
+    for (let x = -half + 2.5; x <= half - 2.5; x += 4) {
+      const m = i++ % 2 ? glowGreen : glowPurple;
+      piece(new THREE.BoxGeometry(1.4, 2.2, 1), m, x, y, -back, 0, false);
+      if (Math.abs(x) > doorHalf + 1) piece(new THREE.BoxGeometry(1.4, 2.2, 1), m, x, y, front, 0, false);
+    }
+    for (let z = -back + 3; z <= front - 3; z += 4) {
+      const m = i++ % 2 ? glowGreen : glowPurple;
+      for (const side of [-1, 1]) piece(new THREE.BoxGeometry(1, 2.2, 1.4), m, side * half, y, z, 0, false);
+    }
+  }
+
+  // The roof: a dark ceiling inside, and a steep slate roof with the ridge running side to side.
+  piece(new THREE.BoxGeometry(half * 2, 0.4, front + back), lambert(0x221a26), 0, height - 0.3, (front - back) / 2, 0, false);
+  const depth = front + back;
+  const pitch = 0.6;
+  const slope = depth / 2 / Math.cos(pitch) + 1;
+  for (const side of [-1, 1]) {
+    const roof = piece(
+      new THREE.BoxGeometry(half * 2 + 2, 0.5, slope),
+      slate,
+      0,
+      height + Math.tan(pitch) * (depth / 4) + 0.2,
+      (front - back) / 2 + side * (depth / 4),
+      0,
+      false,
+    );
+    roof.rotateX(side * pitch);
+  }
+  // Chimneys.
+  for (const x of [-half + 4, half - 4]) piece(new THREE.BoxGeometry(2, 6, 2), stone, x, height + 5, -back + 5, 0, false);
+
+  // Inside the great hall: a dark marble floor, a red carpet from the doors to the throne, chandeliers and banners.
+  piece(new THREE.CylinderGeometry(t.arena.r - 0.4, t.arena.r - 0.4, 0.06, 32), lambert(0x3a3040), 0, 0.03, 0, 0, false);
+  piece(new THREE.BoxGeometry(3, 0.08, front + t.arena.r - 4), lambert(0x7a1420), 0, 0.07, (front - t.arena.r + 4) / 2 - 2, 0, false);
+  const candle = new THREE.MeshBasicMaterial({ color: 0xffc06a });
+  const iron = lambert(0x1a1618);
+  for (const [cx, cz] of [[-7, -6], [7, -6], [-7, 7], [7, 7]]) {
+    piece(new THREE.CylinderGeometry(1.4, 1.4, 0.15, 10), iron, cx, height - 2.5, cz, 0, false);
+    piece(new THREE.BoxGeometry(0.06, 2.3, 0.06), iron, cx, height - 1.3, cz, 0, false);
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      piece(new THREE.BoxGeometry(0.12, 0.35, 0.12), candle, cx + Math.sin(a) * 1.3, height - 2.25, cz + Math.cos(a) * 1.3, 0, false);
+    }
+  }
+  for (const side of [-1, 1]) {
+    for (const z of [-10, 0, 10]) piece(new THREE.BoxGeometry(0.1, 4.5, 1.8), lambert(z === 0 ? 0x5a1a6a : 0x2a5a2a), side * (half - 0.5), 6.5, z, 0, false);
+  }
 }
 
 /** A shimmering dome over a sealed arena. */

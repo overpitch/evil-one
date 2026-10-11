@@ -399,7 +399,8 @@ export const TERRITORIES: TerritoryDef[] = [
     patrol: { route: [{ x: 0, z: -78 }], kinds: [] },
     arena: FORTRESS_ARENA,
     throne: { x: 0, z: -129 },
-    gate: { id: 'fortress-gate', name: 'Fortress Gate', ...around(FORTRESS_ARENA, 0, FORTRESS_ARENA.r + 4) },
+    // Beside the Dread Manor's front doors (not in the doorway).
+    gate: { id: 'fortress-gate', name: 'Dread Manor Doors', ...around(FORTRESS_ARENA, 0.36, FORTRESS_ARENA.r + 8) },
     leader: {
       id: 'zomawi',
       title: 'Zomawi',
