@@ -549,6 +549,8 @@ export class Hud {
     for (const w of WEAPONS) {
       const card = this.weaponCards.get(w.id)!;
       const have = owned.has(w.id);
+      // Improved shop weapons only show once owned (there are a lot of them).
+      card.classList.toggle('hidden', !!w.unlockLevel && !have);
       card.classList.toggle('locked', !have);
       card.classList.toggle('equipped', w.id === equipped);
       card.querySelector('.weapon-name')!.textContent = have ? w.name : '???';

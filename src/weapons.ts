@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { boxShape } from './shapes';
 import type { LeaderId } from './layout';
 
-export type WeaponId = 'sword' | 'gravebreaker' | 'hexfire' | 'bloodfang' | 'doomblade' | 'spear' | 'daggers' | 'axe' | 'hammer' | 'flameblade';
+/** 'sword', 'gravebreaker', ... and the improved shop weapons ('iron-sword', ...). */
+export type WeaponId = string;
 
 /**
  * A weapon the hero can carry. The starting sword is always owned; each
@@ -18,6 +19,8 @@ export interface WeaponDef {
   shop?: boolean;
   /** Only for sale once this many of Commander Hale's missions are done. */
   unlockAfter?: number;
+  /** An improved weapon: for sale once the hero reaches this level. */
+  unlockLevel?: number;
   /** Gold it costs at the weaponsmith; it sells for half. 0 = can't be sold. */
   value: number;
   /** One line about what it does, for the inventory. */
@@ -318,6 +321,74 @@ export const WEAPONS: WeaponDef[] = [
     },
   },
 ];
+
+/** Steel colors in the shop weapons' models and icons, recolored for the improved versions. */
+const STEEL = [0xd8dde3, 0xc8ccd2, 0xa8acb2, 0x8a8e96];
+const STEEL_HEX = ['#d8dde3', '#c8ccd2', '#a8acb2', '#8a8e96'];
+
+/**
+ * An improved version of a shop weapon: hits harder (and sometimes reaches
+ * further or gains a power), forged in a new metal, slightly bigger. For
+ * sale at the weaponsmith once the hero reaches `level`.
+ */
+function improved(
+  baseId: WeaponId,
+  id: WeaponId,
+  name: string,
+  level: number,
+  value: number,
+  metal: number,
+  power: number,
+  extra: { reach?: number; arc?: number; description: string; special?: WeaponDef['special']; pips?: Partial<WeaponDef['pips']> },
+): WeaponDef {
+  const base = WEAPONS.find((w) => w.id === baseId)!;
+  const metalHex = `#${metal.toString(16).padStart(6, '0')}`;
+  const grow = 1 + Math.min(0.3, (power - 1) * 0.15);
+  return {
+    ...base,
+    id,
+    name,
+    from: null,
+    shop: true,
+    unlockLevel: level,
+    value,
+    description: extra.description,
+    pips: { ...base.pips, damage: Math.min(5, base.pips.damage + Math.round(power - 1 + 0.4)), ...extra.pips },
+    swing: { ...base.swing, damage: base.swing.damage * power, reach: base.swing.reach + (extra.reach ?? 0), arc: base.swing.arc + (extra.arc ?? 0) },
+    special: extra.special ?? base.special,
+    color: metal,
+    icon: STEEL_HEX.reduce((icon, hex) => icon.split(hex).join(metalHex), base.icon),
+    build() {
+      const g = base.build();
+      g.scale.setScalar(grow);
+      g.traverse((o) => {
+        if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshLambertMaterial && STEEL.includes(o.material.color.getHex())) o.material = mat(metal);
+      });
+      return g;
+    },
+  };
+}
+
+WEAPONS.push(
+  improved('sword', 'iron-sword', 'Iron Sword', 2, 80, 0x9aa0a8, 1.3, { description: 'A sturdier sword of dark iron. Hits harder than the soldier\'s sword.' }),
+  improved('spear', 'long-spear', 'Long Spear', 4, 140, 0xe8eef6, 1.3, { reach: 0.3, description: 'A longer, sharper spear. Even more reach.' }),
+  improved('axe', 'steel-axe', 'Steel Axe', 5, 200, 0xe8eef6, 1.3, { description: 'A battle axe of bright steel. Heavier blows, the same wide swing.' }),
+  improved('daggers', 'twin-fangs', 'Twin Fangs', 7, 260, 0xc8202e, 1.35, { description: 'Blood-red twin daggers. Fast slashes that bite deeper.' }),
+  improved('sword', 'knights-sword', "Knight's Sword", 8, 300, 0xe8eef6, 1.7, { reach: 0.2, description: 'A long knight\'s sword of polished steel. Strong and reliable.' }),
+  improved('hammer', 'thunder-hammer', 'Thunder Hammer', 10, 380, 0x6a8aff, 1.4, { description: 'A hammer crackling blue. Every hit still sends enemies flying.' }),
+  improved('spear', 'storm-spear', 'Storm Spear', 11, 420, 0x6a8aff, 1.7, { reach: 0.4, description: 'A storm-blue spear with huge reach and a lot more punch.' }),
+  improved('axe', 'great-axe', 'Great Axe', 13, 500, 0x5a5e6a, 1.7, { arc: 0.2, description: 'A huge dark axe. An even wider swing that cuts through crowds.' }),
+  improved('daggers', 'shadow-daggers', 'Shadow Daggers', 14, 540, 0x4a2a6a, 1.8, { description: 'Purple shadow daggers. Lightning fast and deadly.' }),
+  improved('hammer', 'doom-hammer', 'Doom Hammer', 16, 640, 0x3a2a3a, 1.9, { arc: 0.1, description: 'A black hammer of doom. Knocks anything short of a leader flat.' }),
+  improved('sword', 'heros-blade', "Hero's Blade", 17, 700, 0xe8c040, 2.2, { reach: 0.4, description: 'A golden blade for a true hero. Huge damage and reach.' }),
+  improved('axe', 'dragon-axe', 'Dragon Axe', 19, 820, 0xd04a1a, 2.2, { arc: 0.3, description: 'A fiery dragon-forged axe with the widest, hardest swing of all.' }),
+  improved('sword', 'legend-blade', 'Legend Blade', 20, 1000, 0xffd36b, 2.7, {
+    reach: 0.6,
+    special: { slam: { radius: 5, share: 0.6 }, lifesteal: 0.1 },
+    pips: { damage: 5, reach: 5 },
+    description: 'The legendary blade. The strongest weapon there is: every third swing slams the ground, and every hit heals you.',
+  }),
+);
 
 export const WEAPON_BY_ID = Object.fromEntries(WEAPONS.map((w) => [w.id, w])) as Record<WeaponId, WeaponDef>;
 

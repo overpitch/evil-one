@@ -18,6 +18,7 @@ import { CAMP_BANNER, FORT, TERRITORIES, type LeaderId, type ShopKind } from './
 import { XP_REWARD } from './progression';
 import {
   ARMOR,
+  ARMOR_BY_STRENGTH,
   CAPE_STAMINA,
   GOLDEN_ARMOR,
   goldFor,
@@ -250,6 +251,18 @@ function floatText(at: THREE.Vector3, text: string, kind: Parameters<Floaters['s
   if (twoPlayer) floaters2.spawn(at, text, kind);
 }
 
+/** Levels from just after `from` up to `to` unlocked new weapons or armor at the mansion. */
+function announceLevelUnlocks(h: Player, from: number, to: number) {
+  const fresh = [
+    ...WEAPONS.filter((w) => w.unlockLevel && w.unlockLevel > from && w.unlockLevel <= to).map((w) => `${w.name} (Weaponsmith)`),
+    ...ARMOR.filter((a) => a.level && a.level > from && a.level <= to).map((a) => `${a.name} (Armory)`),
+  ];
+  if (fresh.length === 0) return;
+  const who = twoPlayer ? `${h.name} · ` : '';
+  // After the Level Up message.
+  setTimeout(() => hud.announce(`New at Fort Victory: ${fresh.join(', ')}`, `${who}Level ${to} unlocked it · find it in the mansion`, true), 100);
+}
+
 /** Every hero playing gets the gold (each has their own). */
 function awardGold(amount: number) {
   for (const h of ctx.players) if (!(h === player2 && choosingP2)) h.goods.gold += amount;
@@ -259,7 +272,9 @@ function awardGold(amount: number) {
 function awardXp(amount: number) {
   for (const h of ctx.players) {
     if (h === player2 && choosingP2) continue;
-    if (h.gainXp(amount) === 0) continue;
+    const gained = h.gainXp(amount);
+    if (gained === 0) continue;
+    announceLevelUnlocks(h, h.level - gained, h.level);
     const at = new THREE.Vector3(h.pos.x, h.pos.y + 1, h.pos.z);
     particles.burst(at, 0xffd36b, 30, 6);
     particles.burst(at, 0xfff2b0, 15, 4);
@@ -930,17 +945,25 @@ function renderShop() {
     });
     entries.push(unlockable('Potion Belt', g.potionBelt, 'Carry 8 potions instead of 5', () => (g.potionBelt = true)));
   } else if (shopKind === 'armory') {
-    ARMOR.forEach((a, tier) => {
-      if (tier === 0) return;
-      if (tier === GOLDEN_ARMOR && missionsDone() < unlockOf('Golden Armor').after && g.armor < GOLDEN_ARMOR) {
-        entries.push(lockedEntry('Golden Armor'));
-        return;
-      }
+    // Weakest to strongest; armor for higher levels shows one locked teaser at a time.
+    const wornHealth = ARMOR[g.armor]?.health ?? 0;
+    let teaser = false;
+    for (const tier of ARMOR_BY_STRENGTH) {
+      const a = ARMOR[tier];
       const wearing = tier === g.armor;
+      if (!wearing && tier === GOLDEN_ARMOR && missionsDone() < unlockOf('Golden Armor').after) {
+        entries.push(lockedEntry('Golden Armor'));
+        continue;
+      }
+      if (!wearing && a.level && h.level < a.level) {
+        if (!teaser) entries.push({ label: a.name, sub: `Locked · unlocks at level ${a.level} · +${a.health} health`, disabled: true, onClick: () => {} });
+        teaser = true;
+        continue;
+      }
       entries.push({
         label: a.name,
-        sub: wearing ? 'You are wearing it' : tier < g.armor ? 'You have better armor' : `${a.price} gold · +${a.health} health`,
-        disabled: tier <= g.armor || g.gold < a.price,
+        sub: wearing ? 'You are wearing it' : a.health <= wornHealth ? 'You have better armor' : `${a.price} gold · +${a.health} health`,
+        disabled: wearing || a.health <= wornHealth || g.gold < a.price,
         onClick: () => {
           g.gold -= a.price;
           g.armor = tier;
@@ -948,7 +971,7 @@ function renderShop() {
           bought();
         },
       });
-    });
+    }
     entries.push(
       unlockable('Masked Helmet', g.helmet, `A closed steel helmet with a face mask · +${HELMET_HEALTH} health`, () => {
         g.helmet = true;
@@ -984,7 +1007,9 @@ function renderShop() {
   } else {
     // The weaponsmith: buy (or buy back), trade the weapon in hand, or sell.
     const equipped = h.weapon;
-    const forSale = WEAPONS.filter((w) => !mine.has(w.id) && (w.shop || g.pawned.includes(w.id)) && missionsDone() >= (w.unlockAfter ?? 0));
+    const forSale = WEAPONS.filter(
+      (w) => !mine.has(w.id) && (w.shop || g.pawned.includes(w.id)) && missionsDone() >= (w.unlockAfter ?? 0) && h.level >= (w.unlockLevel ?? 0),
+    );
     entries.push({ heading: 'Buy' });
     if (forSale.length === 0) entries.push({ label: 'Nothing left to buy', sub: 'You have every weapon here', disabled: true, onClick: () => {} });
     for (const w of forSale) {
@@ -1016,6 +1041,9 @@ function renderShop() {
       }
     }
     for (const w of WEAPONS) if (w.unlockAfter && missionsDone() < w.unlockAfter && !mine.has(w.id)) entries.push(lockedEntry(w.name as UnlockName));
+    // The next weapon a level up brings.
+    const nextUp = WEAPONS.filter((w) => w.unlockLevel && w.unlockLevel > h.level && !mine.has(w.id)).sort((a, b) => a.unlockLevel! - b.unlockLevel!)[0];
+    if (nextUp) entries.push({ label: nextUp.name, sub: `Locked · unlocks at level ${nextUp.unlockLevel}`, disabled: true, onClick: () => {} });
     entries.push({ heading: 'Sell' });
     const sellable = WEAPONS.filter((w) => mine.has(w.id) && w.value > 0);
     if (sellable.length === 0) entries.push({ label: 'Nothing to sell', sub: "Your Soldier's Sword stays with you", disabled: true, onClick: () => {} });

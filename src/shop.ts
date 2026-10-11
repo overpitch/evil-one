@@ -69,13 +69,29 @@ export const maxPotions = (g: Goods) => (g.potionBelt ? BELT_POTIONS : MAX_POTIO
 /** A potion heals this share of the hero's health. */
 export const POTION_HEAL = 0.5;
 
-export const ARMOR = [
+/**
+ * Armor, by kind (saves keep the index, so new kinds go on the end). Better
+ * armor means more health; `level` armor is for sale once the hero reaches
+ * that level, and Golden Armor waits for Commander Hale's missions.
+ */
+export const ARMOR: { name: string; health: number; price: number; color: number; level?: number }[] = [
   { name: 'No armor', health: 0, price: 0, color: 0 },
   { name: 'Leather Armor', health: 25, price: 40, color: 0x7a4a2a },
   { name: 'Chainmail', health: 60, price: 110, color: 0x8a929c },
   { name: 'Plate Armor', health: 110, price: 240, color: 0xd8dde6 },
   { name: 'Golden Armor', health: 170, price: 400, color: 0xe8b830 },
+  { name: 'Padded Armor', health: 40, price: 70, color: 0x8a6a4a, level: 3 },
+  { name: 'Reinforced Chainmail', health: 85, price: 170, color: 0x9aa3ab, level: 6 },
+  { name: 'Steel Plate', health: 135, price: 300, color: 0xeef2f8, level: 9 },
+  { name: 'Dragonscale Armor', health: 210, price: 500, color: 0x3a7a3a, level: 12 },
+  { name: "Champion's Plate", health: 260, price: 650, color: 0x5a7ad8, level: 15 },
+  { name: 'Titan Armor', health: 320, price: 850, color: 0x4a4e5a, level: 18 },
 ];
+
+/** Armor indexes from weakest to strongest (how the armory lists them). */
+export const ARMOR_BY_STRENGTH = ARMOR.map((_, i) => i)
+  .filter((i) => i > 0)
+  .sort((a, b) => ARMOR[a].health - ARMOR[b].health);
 
 /** The armor tier that waits for Commander Hale's missions. */
 export const GOLDEN_ARMOR = 4;
