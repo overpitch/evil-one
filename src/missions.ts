@@ -7,6 +7,9 @@ import type { TerritoryId } from './layout';
  */
 export const COMMANDER_NAME = 'Commander Hale';
 
+/** Missions completed to be promoted to Commander (and give the army orders). */
+export const PROMOTION_AFTER = 10;
+
 interface MissionBase {
   lair: TerritoryId;
   /** What to defeat, plural ("zombies"). */

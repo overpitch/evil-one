@@ -4,7 +4,7 @@ import { Input, PAD } from './input';
 import { createWorld, heightAt, respawnPoint, territoryWeight } from './world';
 import { Player } from './player';
 import type { Enemy } from './enemy';
-import { Ally, ARMY_SIZE, SQUAD_SIZE, SQUAD_SLOTS } from './ally';
+import { Ally, ARMY_SIZE, SQUAD_SIZE, SQUAD_SLOTS, type ArmyOrder } from './ally';
 import { ThirdPersonCamera } from './camera';
 import { Hud } from './hud';
 import { Particles } from './particles';
@@ -35,7 +35,7 @@ import {
   type UnlockName,
 } from './shop';
 import type { ShopEntry } from './hud';
-import { COMMANDER_NAME, loadMission, missionAt, type MissionState } from './missions';
+import { COMMANDER_NAME, loadMission, missionAt, PROMOTION_AFTER, type MissionState } from './missions';
 import { createHumanoid } from './character';
 import { addCape } from './vampires';
 import { DEFAULT_OUTFIT, loadOutfit, type Outfit } from './outfit';
@@ -542,6 +542,7 @@ function enterWorld(save: SaveData) {
   hud.fadeIn();
   returnSpot = null;
   hud.setGoBackAvailable(false);
+  resetOrders();
   hud.showShop(false);
   shopKind = null;
   atStall.clear();
@@ -681,6 +682,7 @@ function joinPlayer2(padIndex: number) {
   camCtrl2.cut();
   hud.setSplit(true);
   updateAspect();
+  resetOrders();
   reinforceSquad();
 }
 
@@ -700,6 +702,7 @@ function leavePlayer2() {
   inventoryFor = player;
   hud.setPauseInventoryLabel('Inventory');
   removeUnneededDrops();
+  resetOrders();
   player2.h.root.visible = false;
   floaters2.clear();
   hud.setSplit(false);
@@ -778,6 +781,7 @@ let returnSpot: { x: number; z: number; yaw: number } | null = null;
 
 /** Moves both heroes (side by side) and their living soldiers to (x, z). */
 function teleportTeam(x: number, z: number, yaw: number) {
+  resetOrders();
   ctx.players.forEach((h, i) => {
     if (!h.alive) return;
     h.teleport(x - Math.sin(yaw) * 1.6 * i, z - Math.cos(yaw) * 1.6 * i, yaw);
@@ -901,6 +905,10 @@ function renderShop() {
   if (!shopKind) return;
   if (shopKind === 'missions') {
     renderMissions();
+    return;
+  }
+  if (shopKind === 'orders') {
+    renderOrders();
     return;
   }
   const h = shopFor;
@@ -1151,7 +1159,7 @@ function renderMissions() {
     entries.push({ heading: `Mission ${m.index + 1}` });
     entries.push({
       label: job,
-      sub: `Reward: ${m.gold} gold${twoPlayer ? ' each' : ''}${nextUnlock(m.index) ? ` and unlocks the ${nextUnlock(m.index)}` : ''} · Press to accept`,
+      sub: `Reward: ${m.gold} gold${twoPlayer ? ' each' : ''}${nextUnlock(m.index) ? ` and unlocks the ${nextUnlock(m.index)}` : ''}${m.index + 1 === PROMOTION_AFTER ? ' and promotes you to Commander!' : ''} · Press to accept`,
       onClick: () => {
         mission = { index: m.index, active: true, progress: 0 };
         sfx.warHorn();
@@ -1177,6 +1185,10 @@ function renderMissions() {
         mission = { index: m.index + 1, active: false, progress: 0 };
         const unlocked = UNLOCKS.find((u) => u.after === mission.index);
         if (unlocked) hud.announce(`New at Fort Victory: ${unlocked.name}`, `Find it at the ${unlocked.shop} in the mansion`, true);
+        if (mission.index === PROMOTION_AFTER) {
+          sfx.victoryHorn();
+          hud.announce('You are now a Commander!', 'Give your army orders from the pause menu', true);
+        }
         sfx.levelUp();
         floatText(new THREE.Vector3(shopFor.pos.x, shopFor.pos.y + 2.2, shopFor.pos.z), `+${m.gold} gold`, 'xp');
         renderShop();
@@ -1187,6 +1199,61 @@ function renderMissions() {
   const sub = `${twoPlayer ? `${shopFor.name} has` : 'You have'} ${shopFor.goods.gold} gold`;
   hud.renderShop(COMMANDER_NAME, sub, entries, inputOf(shopFor).mode === 'gamepad');
 }
+
+// ---------- A commander's army orders ----------
+
+/** Promoted after Commander Hale's tenth mission (both heroes, in two-player). */
+function isCommander() {
+  return mission.index >= PROMOTION_AFTER;
+}
+
+const ORDERS: { order: ArmyOrder; name: string; what: string }[] = [
+  { order: 'follow', name: 'Follow me', what: 'Stay with me and fight whatever comes near' },
+  { order: 'hold', name: 'Hold here', what: 'Stand right here and fight anyone who comes close' },
+  { order: 'charge', name: 'Charge!', what: 'Go after every enemy in sight' },
+  { order: 'guard', name: 'Guard me', what: 'Stick close and only fight enemies right next to me' },
+];
+
+/** Each hero's current order to their army. */
+const armyOrders = new Map<Player, ArmyOrder>();
+
+/** Gives `hero`'s army an order (holding happens where the hero stands now). */
+function orderArmy(hero: Player, order: ArmyOrder) {
+  armyOrders.set(hero, order);
+  for (const a of allies) {
+    if (a.hero !== hero) continue;
+    a.order = order;
+    a.holdAt.copy(hero.pos);
+    a.holdYaw = hero.yaw;
+  }
+}
+
+/** Back to "follow me" (after teleporting, respawning, or a player joining or leaving). */
+function resetOrders() {
+  for (const h of [player, player2]) orderArmy(h, 'follow');
+}
+
+function renderOrders() {
+  const h = shopFor;
+  const current = armyOrders.get(h) ?? 'follow';
+  const entries: ShopEntry[] = ORDERS.map((o) => ({
+    label: o.name,
+    sub: o.order === current ? `Current order · ${o.what}` : o.what,
+    onClick: () => {
+      orderArmy(h, o.order);
+      sfx.warHorn();
+      hud.announce(o.name, twoPlayer ? `${h.name}'s army: ${o.what.toLowerCase()}` : o.what);
+      closeShop();
+    },
+  }));
+  hud.renderShop('Army orders', `Commander ${h.name}, your army awaits`, entries, inputOf(h).mode === 'gamepad');
+}
+
+hud.onOrders = () => {
+  const h = twoPlayer ? pausedBy : player;
+  hud.showPause(false);
+  openShop(h, 'orders');
+};
 
 // ---------- Menu flow: title → (name → intro | continue) → play ----------
 
@@ -1539,8 +1606,10 @@ function tick(realDt: number) {
   if (hud.pauseOpen) hud.setPadDebug(input.debugText() + (twoPlayer ? ` · P2 ${input2.debugText()}` : ''));
   hud.update(kills);
   hud.setButtonHints(IS_XBOX || twoPlayer || input.mode === 'gamepad');
-  hud.views[0].update(player, revivingIn(player));
-  if (twoPlayer) hud.views[1].update(player2, revivingIn(player2));
+  const commander = isCommander();
+  hud.views[0].update(player, revivingIn(player), commander);
+  if (twoPlayer) hud.views[1].update(player2, revivingIn(player2), commander);
+  hud.setOrdersAvailable(commander && phase === 'playing');
   for (const i of inputs) i.endFrame();
 }
 

@@ -20,8 +20,8 @@ export interface Spot {
 export const HUMAN_CAMP = { x: 0, z: 0 };
 export const CAMP_BANNER = { id: 'camp', name: 'Human Camp', x: 3, z: -9 };
 
-/** A Fort Victory shop, or Commander Hale's missions (after the war). */
-export type ShopKind = 'potions' | 'armory' | 'weapons' | 'barracks' | 'missions';
+/** A Fort Victory shop, Commander Hale's missions (after the war), or a commander's army orders. */
+export type ShopKind = 'potions' | 'armory' | 'weapons' | 'barracks' | 'missions' | 'orders';
 
 /**
  * Fort Victory: the heroes' base, on a big hill in the empty northeast.
@@ -45,7 +45,7 @@ export const FORT = (() => {
    * 1 right), its counter facing the red carpet down the middle. `angle` turns
    * the stall so its back is to the wall; `front` is where a customer stands.
    */
-  const stall = (kind: Exclude<ShopKind, 'missions'>, name: string, side: number, forward: number) => {
+  const stall = (kind: Exclude<ShopKind, 'missions' | 'orders'>, name: string, side: number, forward: number) => {
     const wallward = { x: Math.cos(gateAngle) * side, z: -Math.sin(gateAngle) * side };
     return {
       kind,

@@ -30,8 +30,22 @@ const MAX_HP = 70;
 const ELITE_HP = 130;
 const ELITE_DAMAGE = 1.6;
 const ELITE_CREST = new THREE.MeshLambertMaterial({ color: 0xffc23a, flatShading: true });
-const ENGAGE_RANGE = 14; // from the soldier
-const LEASH = 24; // from the hero
+/**
+ * A commander's orders (after Commander Hale's tenth mission):
+ * - follow: stay in formation around the hero and fight what comes near;
+ * - hold: stand where the order was given and fight what comes close;
+ * - charge: go after every enemy in a wide area;
+ * - guard: stick close and only fight enemies right by the hero.
+ */
+export type ArmyOrder = 'follow' | 'hold' | 'charge' | 'guard';
+
+/** How far (from the soldier) they look for enemies, and how far from the hero (or the held spot) they'll chase. */
+const ORDER_RANGES: Record<ArmyOrder, { engage: number; leash: number }> = {
+  follow: { engage: 14, leash: 24 },
+  hold: { engage: 12, leash: 14 },
+  charge: { engage: 45, leash: 60 },
+  guard: { engage: 6, leash: 7 },
+};
 const WINDUP = 0.4;
 const RECOVER = 0.55;
 const BLOCK_CHANCE = 0.3;
@@ -60,6 +74,10 @@ export class Ally implements Target {
 
   /** The hero this soldier follows (falls back to the other hero while theirs is down). */
   hero: Player | null = null;
+  /** Their commander's current order, and where to stand for "hold here". */
+  order: ArmyOrder = 'follow';
+  readonly holdAt = new THREE.Vector3();
+  holdYaw = 0;
   /** A gold crest on the helmet marks an elite soldier. */
   private readonly crest: THREE.Mesh;
 
@@ -131,11 +149,15 @@ export class Ally implements Target {
 
   /** Where this soldier stands in formation behind the hero. */
   slotPosition(ctx: GameContext, out: THREE.Vector3) {
+    // Holding: in formation around the spot where the order was given.
+    const hold = this.order === 'hold';
     const p = this.leaderOf(ctx);
+    const at = hold ? this.holdAt : p.pos;
+    const yaw = hold ? this.holdYaw : p.yaw;
     const [right, forward] = SLOTS[this.slot];
-    const fx = Math.sin(p.yaw);
-    const fz = Math.cos(p.yaw);
-    return out.set(p.pos.x + fx * forward - fz * right, 0, p.pos.z + fz * forward + fx * right);
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    return out.set(at.x + fx * forward - fz * right, 0, at.z + fz * forward + fx * right);
   }
 
   update(dt: number, ctx: GameContext) {
@@ -144,8 +166,8 @@ export class Ally implements Target {
     this.crest.visible = this.elite;
     const player = this.leaderOf(ctx);
 
-    // Catch up if left far behind (e.g. the hero respawned).
-    if (this.alive && this.pos.distanceTo(player.pos) > 55) {
+    // Catch up if left far behind (e.g. the hero respawned), unless ordered to hold.
+    if (this.alive && this.order !== 'hold' && this.pos.distanceTo(player.pos) > 55) {
       const s = this.slotPosition(ctx, this.desired);
       this.reinforce(s.x, s.z);
     }
@@ -274,10 +296,12 @@ export class Ally implements Target {
   private findTarget(ctx: GameContext): Enemy | null {
     if (ctx.peaceful) return null;
     let best: Enemy | null = null;
-    let bestDist = ENGAGE_RANGE;
+    const range = ORDER_RANGES[this.order];
+    let bestDist = range.engage;
+    const anchor = this.order === 'hold' ? this.holdAt : this.leaderOf(ctx).pos;
     for (const z of ctx.enemies) {
       if (!z.alive || z.state === 'rising' || z.flying || !z.fightActive) continue;
-      if (z.pos.distanceTo(this.leaderOf(ctx).pos) > LEASH) continue;
+      if (Math.hypot(z.pos.x - anchor.x, z.pos.z - anchor.z) > range.leash) continue;
       const d = z.pos.distanceTo(this.pos);
       if (d < bestDist) {
         bestDist = d;

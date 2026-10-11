@@ -131,9 +131,10 @@ export class HeroView {
     this.el['potion-hint'].innerHTML = '<span class="keys-only">· H to drink</span><span class="pad-only">· D-pad ↑ to drink</span>';
   }
 
-  update(player: Player, revivingIn: number | null) {
+  update(player: Player, revivingIn: number | null, commander = false) {
     const e = this.el;
-    e.name.textContent = player.name;
+    const name = commander ? `Cmdr ${player.name}` : player.name;
+    if (e.name.textContent !== name) e.name.textContent = name;
     e.level.textContent = `Lv ${player.level}`;
     e['hp-fill'].style.width = `${(player.hp / player.maxHp) * 100}%`;
     e['hp-text'].textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
@@ -220,6 +221,8 @@ export class Hud {
   onOutfitDone?: () => void;
   /** Pause menu: change outfit. */
   onOutfit?: () => void;
+  /** Pause menu: a commander's army orders. */
+  onOrders?: () => void;
   /** Pause menu: teleport the team to Fort Victory, or back to where they were. */
   onGoToFort?: () => void;
   onGoBack?: () => void;
@@ -355,6 +358,7 @@ export class Hud {
     $('pause-back-btn').addEventListener('click', () => this.onGoBack?.());
     $('shop-close-btn').addEventListener('click', () => this.onShopClose?.());
     $('pause-outfit-btn').addEventListener('click', () => this.onOutfit?.());
+    $('pause-orders-btn').addEventListener('click', () => this.onOrders?.());
     $('outfit-done-btn').addEventListener('click', () => this.onOutfitDone?.());
     this.buildOutfitOptions();
 
@@ -699,6 +703,11 @@ export class Hud {
   /** Pause menu: show "Go back" after teleporting to the fort. */
   setGoBackAvailable(available: boolean) {
     $('pause-back-btn').classList.toggle('hidden', !available);
+  }
+
+  /** Commanders get an Army orders button on the pause menu. */
+  setOrdersAvailable(available: boolean) {
+    $('pause-orders-btn').classList.toggle('hidden', !available);
   }
 
   setPauseInventoryLabel(label: string) {
