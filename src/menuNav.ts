@@ -50,6 +50,7 @@ export class MenuNavigator {
       this.setFocus(null);
       return;
     }
+    this.scrollWith(pads, screen);
     // Each control is a button, a slider, a checkbox, the name field, or a whole segmented switch.
     const items = [...screen.querySelectorAll<HTMLElement>('button, input[type="range"], input[type="checkbox"], input[type="text"], input:not([type]), .segmented')].filter(
       (el) => visible(el) && !el.closest('.segmented:not(:scope)') && getComputedStyle(el).opacity !== '0',
@@ -118,5 +119,19 @@ export class MenuNavigator {
     this.focused?.classList.remove(FOCUS_CLASS);
     this.focused = el;
     el?.classList.add(FOCUS_CLASS);
+    // Long lists (shops, inventory) scroll so the highlighted item is always on screen.
+    try {
+      el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    } catch {
+      /* older browsers */
+    }
+  }
+
+  /** The right stick scrolls a long menu up and down (no scroll bar to grab on a controller). */
+  private scrollWith(inputs: Input[], screen: HTMLElement) {
+    const y = inputs.reduce((sum, i) => sum + i.lookStick().y, 0);
+    if (Math.abs(y) < 0.02) return;
+    const panel = [screen, ...screen.querySelectorAll<HTMLElement>('.panel')].find((el) => el.scrollHeight > el.clientHeight + 2);
+    if (panel) panel.scrollTop += y * 18;
   }
 }

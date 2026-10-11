@@ -1709,7 +1709,14 @@ const XBOX_TIP = 'Hold the ☰ Menu button for a second to switch the controller
 let xboxTipTimer = 0;
 
 // Console browsers scroll the page with the right stick; there's nothing to scroll, so ignore it.
-window.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+// (Menus that are longer than the screen can still be scrolled with the wheel.)
+window.addEventListener(
+  'wheel',
+  (e) => {
+    if (!(e.target instanceof Element && e.target.closest('.overlay'))) e.preventDefault();
+  },
+  { passive: false },
+);
 
 if (IS_XBOX) {
   // Edge on Xbox maps the controller's B button to browser Back. Keep an extra
