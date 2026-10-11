@@ -682,6 +682,7 @@ export class Player implements Target {
     h.torso.rotation.x = this.sprinting ? 0.2 : 0.05;
     const sword = h.sword!;
     sword.rotation.set(-0.1, 0, 0);
+    this.offhand.rotation.set(-0.1, 0, 0);
 
     switch (this.state) {
       case 'move':
@@ -769,10 +770,24 @@ export class Player implements Target {
       extend = 1 - k;
       if (sw.heavy) h.torso.rotation.x = 0.4 - k * 0.35;
     }
-    h.armR.rotation.set(lift, sweep * 0.75, 0);
-    h.torso.rotation.y = sweep * 0.3;
-    h.sword!.rotation.x = lerp(-0.1, Math.PI / 2, extend);
-    h.armL.rotation.set(-0.6, 0, 0.35);
+    // Twin daggers take turns: right hand, then left, then both together.
+    const dual = !!this.weapon.offhand;
+    const right = !dual || this.combo !== 1;
+    const left = dual && this.combo !== 0;
+    if (right) {
+      h.armR.rotation.set(lift, sweep * 0.75, 0);
+      h.sword!.rotation.x = lerp(-0.1, Math.PI / 2, extend);
+    } else {
+      h.armR.rotation.set(-0.6, 0, -0.35);
+    }
+    if (left) {
+      // The left arm mirrors the swing.
+      h.armL.rotation.set(lift, -sweep * 0.75, 0);
+      this.offhand.rotation.x = lerp(-0.1, Math.PI / 2, extend);
+    } else {
+      h.armL.rotation.set(-0.6, 0, 0.35);
+    }
+    h.torso.rotation.y = right && left ? 0 : (left ? -sweep : sweep) * 0.3;
     h.legL.rotation.x = -0.35;
     h.legR.rotation.x = 0.3;
   }
