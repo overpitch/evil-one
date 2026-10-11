@@ -28,6 +28,7 @@ const CONTROLS: [string, string][] = [
   ['I', 'Inventory (choose your weapon)'],
   ['1 – 9', 'Quick-swap weapon'],
   ['H', 'Drink a healing potion'],
+  ['R', 'Weapon on your back / draw it'],
   ['Esc', 'Pause'],
 ];
 
@@ -36,7 +37,8 @@ const PAD_CONTROLS: [string, string][] = [
   ['Left stick', 'Move'],
   ['Right stick', 'Look'],
   ['RT or X', 'Attack (keep pressing for a 3-hit combo)'],
-  ['LT or LB (hold)', 'Block'],
+  ['LT (hold)', 'Block'],
+  ['LB', 'Weapon on your back / draw it'],
   ['A', 'Dodge roll'],
   ['B (hold)', 'Sprint'],
   ['View', 'Map'],
@@ -284,7 +286,7 @@ export class Hud {
       const pad = document.createElement('p');
       pad.className = 'pad-controls keys-only';
       pad.textContent =
-        'Controller: left stick move · right stick look · RT or X attack · LT or LB block · A roll · B sprint · Y inventory · D-pad left/right swap weapon · View map · Menu pause';
+        'Controller: left stick move · right stick look · RT or X attack · LT block · LB weapon on back · A roll · B sprint · Y inventory · D-pad left/right swap weapon · View map · Menu pause';
       dl.after(pad);
     }
 

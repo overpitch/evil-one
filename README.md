@@ -34,6 +34,7 @@ Then go to http://localhost:5173, choose **New Game**, name your hero, and click
 | Attack (press repeatedly for a 3-hit combo) | Click or `J` |
 | Block (hold) | `Q` or `K` |
 | Dodge roll | `Space` |
+| Weapon on your back (faster sprint) / draw it | `R` |
 | Sprint | `Shift` |
 | Map | `M` |
 | Inventory (choose your weapon) | `I` |
@@ -46,7 +47,8 @@ Then go to http://localhost:5173, choose **New Game**, name your hero, and click
 |---|---|
 | Move / look | Left stick / right stick |
 | Attack | RT or X |
-| Block (hold) | LT or LB |
+| Block (hold) | LT |
+| Weapon on your back (faster sprint) / draw it | LB |
 | Dodge roll | A |
 | Sprint (hold) | B or click the left stick |
 | Map | View |

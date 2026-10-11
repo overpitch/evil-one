@@ -2,7 +2,7 @@ import { IS_XBOX } from './settings';
 
 /** Keys the browser should never act on while playing (e.g. Space scrolling the page). */
 const GAME_KEYS = new Set([
-  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyK', 'KeyJ', 'KeyE', 'KeyM', 'KeyI', 'KeyH',
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyK', 'KeyJ', 'KeyE', 'KeyM', 'KeyI', 'KeyH', 'KeyR',
   'Space', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
 ]);
 
@@ -292,7 +292,12 @@ export class Input {
   }
 
   get blockHeld() {
-    return this.key('KeyQ', 'KeyK') || this.padIsDown(PAD.LT, PAD.LB);
+    return this.key('KeyQ', 'KeyK') || this.padIsDown(PAD.LT);
+  }
+
+  /** LB, or R: put the weapon on your back (or draw it). */
+  get sheathePressed() {
+    return this.pressed.has('KeyR') || this.padWasPressed(PAD.LB);
   }
 
   get sprintHeld() {

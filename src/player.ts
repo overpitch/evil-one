@@ -81,6 +81,8 @@ const PLAYER2_LOOK: HumanoidLook = { ...PLAYER_LOOK, shirt: 0x2a4fa3, plume: 0x3
 const HURT_COLOR = new THREE.Color(0xff2020);
 const SLOW_COLOR = new THREE.Color(0x9a4aff);
 const SLOW_FACTOR = 0.55;
+/** Running with the weapon on your back is quicker. */
+const SHEATHED_SPRINT = 1.15;
 const GOO_FACTOR = 0.5;
 const GOO_COLOR = new THREE.Color(0x4adf2a);
 
@@ -125,6 +127,8 @@ export class Player implements Target {
   /** The masked helmet and the hero's cape (from Commander Hale's unlocks). */
   private readonly helmet = new THREE.Group();
   private readonly cape = new THREE.Group();
+  /** The weapon is on the hero's back (faster sprinting; attacking or blocking draws it). */
+  sheathed = false;
   /** Second weapons for the left hand (twin daggers). */
   private readonly offhandModels = new Map<WeaponId, THREE.Group>();
   private swings = swingsFor(this.weapon);
@@ -242,9 +246,9 @@ export class Player implements Target {
     const h = createHumanoid(outfitLook(this.baseLook, outfit));
     // Player 2's fishnets are black.
     dressHero(h, outfit, this.baseLook.skin, this.baseLook === PLAYER2_LOOK);
-    h.armR.add(this.hand);
+    (this.sheathed ? h.torso : h.armR).add(this.hand);
     h.sword = this.hand;
-    h.armL.add(this.offhand);
+    (this.sheathed ? h.torso : h.armL).add(this.offhand);
     h.torso.add(this.armorPlate);
     h.materials.push(this.armorMat);
     h.head.add(this.helmet);
@@ -256,6 +260,23 @@ export class Player implements Target {
     old.root.removeFromParent();
     // (The old body's shapes are shared with other characters, so they're kept.)
     this.h = h;
+  }
+
+  /** Moves the weapon (and a second dagger) between the hands and the hero's back. */
+  setSheathed(on: boolean) {
+    if (this.sheathed === on) return;
+    this.sheathed = on;
+    const h = this.h;
+    if (on) {
+      h.torso.add(this.hand, this.offhand);
+    } else {
+      h.armR.add(this.hand);
+      h.armL.add(this.offhand);
+      for (const g of [this.hand, this.offhand]) {
+        g.position.set(0, -0.64, 0);
+        g.rotation.order = 'XYZ';
+      }
+    }
   }
 
   /** Puts a different weapon in the hero's hand. */
@@ -359,6 +380,7 @@ export class Player implements Target {
     this.stamina = this.maxStamina;
     this.hurtFlash = 0;
     this.slowTimer = 0;
+    this.setSheathed(false);
     this.setState('move');
   }
 
@@ -366,6 +388,12 @@ export class Player implements Target {
     this.stateTime += dt;
     this.sinceHurt += dt;
     this.attackBuffer = input.attackPressed ? 0.25 : Math.max(0, this.attackBuffer - dt);
+    if (this.state === 'move' && input.sheathePressed) {
+      this.setSheathed(!this.sheathed);
+      sfx.swing(false, 0.4);
+    }
+    // Attacking or blocking draws the weapon straight away.
+    if (this.sheathed && (this.attackBuffer > 0 || input.blockHeld)) this.setSheathed(false);
     this.rollBuffer = input.rollPressed ? 0.2 : Math.max(0, this.rollBuffer - dt);
 
     // Movement is relative to where the camera looks (FPS-style strafing).
@@ -389,7 +417,7 @@ export class Player implements Target {
           this.stamina = Math.max(0, this.stamina - 22 * dt);
           this.staminaDelay = 0.5;
         }
-        target.copy(wish).multiplyScalar((this.blocking ? 2.2 : this.sprinting ? 8.2 : 5) * (this.slowTimer > 0 ? SLOW_FACTOR : 1) * (this.inGoo ? GOO_FACTOR : 1));
+        target.copy(wish).multiplyScalar((this.blocking ? 2.2 : this.sprinting ? 8.2 * (this.sheathed ? SHEATHED_SPRINT : 1) : 5) * (this.slowTimer > 0 ? SLOW_FACTOR : 1) * (this.inGoo ? GOO_FACTOR : 1));
         if (this.rollBuffer > 0 && this.stamina >= ROLL_STAMINA) this.startRoll(wish.lengthSq() > 0 ? wish : forward);
         else if (this.attackBuffer > 0 && this.stamina > 0) this.startAttack(0);
         break;
@@ -768,6 +796,16 @@ export class Player implements Target {
         h.armR.rotation.set(-2.6 * t, 0, -0.4);
         h.legL.rotation.x = h.legR.rotation.x = 0;
         break;
+      }
+    }
+
+    if (this.sheathed) {
+      // On the back: the grip over the right shoulder, the blade hanging down diagonally
+      // (a second dagger crosses it from the left shoulder).
+      for (const [g, side] of [[this.hand, -1], [this.offhand, 1]] as const) {
+        g.position.set(0.2 * side, 0.62, -0.25);
+        g.rotation.order = 'ZXY';
+        g.rotation.set(Math.PI / 2, 0, -0.55 * side);
       }
     }
 
