@@ -14,7 +14,8 @@ import { initAudio, musicOutput, setVolumes, sfx } from './audio';
 import { Music, type Mood, type Theme } from './music';
 import { MenuNavigator } from './menuNav';
 import { Campaign, type Objective } from './campaign';
-import { CAMP_BANNER, FORT, TERRITORIES, type LeaderId, type ShopKind } from './layout';
+import { CAMP_BANNER, DUEL_ARENA, FORT, TERRITORIES, type LeaderId, type ShopKind } from './layout';
+import { DUEL_DIFFICULTY, DUEL_RESPAWN, DUEL_TARGET, DuelFoe } from './duel';
 import { XP_REWARD } from './progression';
 import {
   ARMOR,
@@ -158,6 +159,22 @@ const owned = new Set<WeaponId>([STARTING_WEAPON]);
 const owned2 = new Set<WeaponId>([STARTING_WEAPON]);
 const ownedBy = (h: Player) => (h === player2 ? owned2 : owned);
 
+/** Duel mode: the two heroes and their armies fight each other in the arena. */
+let duel = false;
+/** Knockouts so far: Player 1's, Player 2's. */
+let duelScore: [number, number] = [0, 0];
+/** Someone has won; the Rematch screen is up. */
+let duelOver = false;
+/** Heroes down and already counted (each knockout scores once). */
+const knockedOut = new Set<Player>();
+/** Potions each hero brought, given back for a rematch (a duel never uses anything up). */
+let duelPotions: [number, number] = [0, 0];
+/** Each side, as the other side's sword sees it. */
+const duelSides: [DuelFoe[], DuelFoe[]] = [[player, ...army1].map((b) => new DuelFoe(b)), [player2, ...army2].map((b) => new DuelFoe(b))];
+
+/** Both heroes are in and fighting (not still waiting for, or choosing, Player 2). */
+const duelLive = () => duel && twoPlayer && !choosingP2;
+
 const ctx: GameContext = {
   scene,
   colliders: world.colliders,
@@ -166,6 +183,10 @@ const ctx: GameContext = {
   leader: player,
   allies,
   enemies,
+  foesOf: (team) => (!duel ? enemies : duelLive() ? duelSides[1 - team] : []),
+  get duel() {
+    return duel;
+  },
   particles,
   projectiles,
   difficulty: DIFFICULTIES[settings.difficulty],
@@ -289,6 +310,7 @@ function awardXp(amount: number) {
 }
 
 function saveGame() {
+  if (duel) return; // a duel changes nothing
   writeSave({
     version: 1,
     name: player.name,
@@ -313,6 +335,7 @@ function saveGame() {
  * anything else (XP and kills still only count from the last checkpoint).
  */
 function saveWeapons() {
+  if (duel) return;
   const save = loadSave();
   if (save) writeSave({ ...save, weapons: [...owned], weapon: player.weapon.id, goods: player.goods, outfit: player.outfit, mission });
   saveP2();
@@ -327,7 +350,7 @@ let choosingP2 = false;
 
 /** Saves Player 2's hero: level, XP and weapons. */
 function saveP2() {
-  if (!twoPlayer || !p2Hero) return;
+  if (!twoPlayer || !p2Hero || duel) return;
   p2Hero = { ...p2Hero, level: player2.level, xp: player2.xp, weapons: [...owned2], weapon: player2.weapon.id, goods: player2.goods, outfit: player2.outfit };
   saveHero(p2Hero);
 }
@@ -350,6 +373,10 @@ function becomeHero(hero: Player2Hero) {
   reinforceSquad();
   hud.showP2Picker(null);
   saveHero(hero);
+  if (duel) {
+    startDuel();
+    return;
+  }
   sfx.warHorn();
   hud.announce(`${hero.name} joins the fight!`, `Level ${hero.level} · Each hero leads an army of three`);
 }
@@ -359,7 +386,10 @@ hud.onP2Pick = (id) => {
   if (hero) becomeHero(hero);
 };
 hud.onP2New = (name) => becomeHero(newHero(name));
-hud.onP2Cancel = () => leavePlayer2();
+hud.onP2Cancel = () => {
+  leavePlayer2();
+  if (duel) waitForDuelist();
+};
 
 // A Player 2 from before saved heroes existed (weapons kept in the main save) becomes a saved hero.
 {
@@ -695,6 +725,7 @@ function joinPlayer2(padIndex: number) {
   camCtrl2.yaw = camCtrl.yaw;
   camCtrl2.pitch = camCtrl.pitch;
   camCtrl2.cut();
+  if (duel) toDuelSpawn(player2);
   hud.setSplit(true);
   updateAspect();
   resetOrders();
@@ -756,6 +787,7 @@ function checkJoin() {
 
 /** A fallen hero comes back beside the other one after a few seconds (two-player). */
 function revivingIn(h: Player): number | null {
+  if (duel) return h.alive || duelOver ? null : DUEL_RESPAWN - h.stateTime;
   if (!twoPlayer || h.alive) return null;
   const other = h === player ? player2 : player;
   return other.alive ? REVIVE_TIME - h.stateTime : null;
@@ -1279,6 +1311,130 @@ hud.onOrders = () => {
   openShop(h, 'orders');
 };
 
+// ---------- Duels ----------
+
+/** "Red 2 – 1 Blue": the score with each hero's name. */
+function duelScoreText() {
+  return `${player.name} ${duelScore[0]} – ${duelScore[1]} ${player2.name}`;
+}
+
+/** A hero at their end of the arena, facing the other end, at full strength. */
+function toDuelSpawn(h: Player) {
+  const s = DUEL_ARENA.spawns[h.team];
+  h.reset(s.x, s.z);
+  h.yaw = s.yaw;
+  const cam = h === player ? camCtrl : camCtrl2;
+  cam.yaw = s.yaw;
+  cam.pitch = 0.12;
+  cam.cut();
+}
+
+function waitForDuelist() {
+  waitingForP2 = true;
+  hud.announce('The Arena', 'Player 2: press A on the second controller to join the duel', true);
+}
+
+/** Title → Duel: Player 1's saved hero (with all their gear) walks into the arena and waits for Player 2. */
+function enterDuel() {
+  initAudio();
+  const save = loadSave();
+  duel = true;
+  duelOver = false;
+  duelScore = [0, 0];
+  knockedOut.clear();
+  hud.fadeIn();
+  hud.setDuelMode(true);
+  player.loadHero(save?.name ?? 'Player 1', save?.level ?? 1, save?.xp ?? 0);
+  loadWeapons(save);
+  ctx.difficulty = DUEL_DIFFICULTY;
+  ctx.arenaLock = null;
+  ctx.peaceful = false;
+  ctx.leader = player;
+  returnSpot = null;
+  hud.setGoBackAvailable(false);
+  hud.showShop(false);
+  shopKind = null;
+  atStall.clear();
+  hud.showInventory(false);
+  hud.showBoss(null);
+  hud.showDeath(false);
+  hud.showMap(false);
+  hud.showScreen('none');
+  projectiles.clear();
+  floaters.clear();
+  floaters2.clear();
+  hitStopTimer = 0;
+  deathShown = false;
+  phase = 'playing';
+  toDuelSpawn(player);
+  resetOrders();
+  reinforceSquad(true);
+  waitForDuelist();
+  lockPointer();
+}
+hud.onDuel = enterDuel;
+
+/** Both heroes ready (or a rematch): everyone back to their own end, 0–0. */
+function startDuel(rematch = false) {
+  if (rematch) [player.goods.potions, player2.goods.potions] = duelPotions;
+  else duelPotions = [player.goods.potions, player2.goods.potions];
+  duelScore = [0, 0];
+  duelOver = false;
+  knockedOut.clear();
+  hud.showScreen('none');
+  projectiles.clear();
+  for (const h of [player, player2]) toDuelSpawn(h);
+  resetOrders();
+  reinforceSquad(true);
+  sfx.warHorn();
+  hud.announceNow('Duel!', `${player.name} vs ${player2.name} · First to ${DUEL_TARGET} knockouts wins`, true);
+  lockPointer();
+}
+hud.onRematch = () => startDuel(true);
+hud.onLeaveDuel = () => returnToTitle();
+
+/** Scores each knockout, brings fallen heroes (and their soldiers) back, and ends the duel at five. */
+function updateDuel() {
+  if (!duelLive() || duelOver) return;
+  for (const h of [player, player2]) {
+    if (h.alive) continue;
+    if (!knockedOut.has(h)) {
+      knockedOut.add(h);
+      const winner = h === player ? player2 : player;
+      duelScore[winner.team]++;
+      if (duelScore[winner.team] >= DUEL_TARGET) {
+        endDuel(winner);
+        return;
+      }
+      sfx.warHorn();
+      hud.announceNow(`${winner.name} knocked out ${h.name}!`, duelScoreText(), true);
+    } else if (h.stateTime > DUEL_RESPAWN) {
+      knockedOut.delete(h);
+      toDuelSpawn(h);
+      // Their fallen soldiers come back with them.
+      const slot = new THREE.Vector3();
+      for (const a of h === player ? army1 : army2) {
+        if (a.alive || !inService(a)) continue;
+        a.slotPosition(ctx, slot);
+        a.reinforce(slot.x, slot.z);
+      }
+      particles.burst(new THREE.Vector3(h.pos.x, h.pos.y + 1, h.pos.z), h.team === 0 ? 0xff5a5a : 0x5a8aff, 24, 5);
+      sfx.checkpoint();
+    }
+  }
+}
+
+function endDuel(winner: Player) {
+  duelOver = true;
+  sfx.victoryHorn();
+  hud.showPause(false);
+  hud.showInventory(false);
+  hud.showShop(false);
+  shopKind = null;
+  if (document.pointerLockElement) document.exitPointerLock();
+  hud.showDuelOver(winner.name, `${duelScoreText()} · First to ${DUEL_TARGET} knockouts`);
+}
+
 // ---------- Menu flow: title → (name → intro | continue) → play ----------
 
 /** Grabs the pointer. If the browser refuses, the pause screen offers a Resume button. */
@@ -1337,7 +1493,7 @@ hud.onRespawn = () => {
 };
 hud.onSettings = (s) => {
   applySettings(s);
-  ctx.difficulty = DIFFICULTIES[s.difficulty];
+  if (!duel) ctx.difficulty = DIFFICULTIES[s.difficulty];
   saveSettings(s);
 };
 input.onLockChange = (locked) => {
@@ -1346,6 +1502,7 @@ input.onLockChange = (locked) => {
     pausedBy = player;
     hud.setPauseInventoryLabel(twoPlayer ? `${player.name}'s inventory` : 'Inventory');
   }
+  if (duelOver) return; // the duel's Rematch screen is up
   if (twoPlayer && !locked && phase === 'playing' && !hud.optionsOpen && !hud.inventoryOpen && !hud.shopOpen && !hud.outfitOpen && !endingShown) {
     // Player 1 let go of the mouse: their own pause menu, on their half.
     hud.showPause(true, 'left');
@@ -1395,6 +1552,13 @@ hud.onKeepExploring = () => {
 /** Back to the title screen (progress since the last checkpoint is dropped; the save stays). */
 function returnToTitle() {
   leavePlayer2();
+  if (duel) {
+    duel = false;
+    duelOver = false;
+    waitingForP2 = false;
+    hud.setDuelMode(false);
+    ctx.difficulty = DIFFICULTIES[settings.difficulty];
+  }
   endingShown = false;
   phase = 'menu';
   ctx.peaceful = true;
@@ -1462,6 +1626,7 @@ function updateMenuCamera(dt: number) {
 }
 
 let combatHold = 0;
+const duelFocus = new THREE.Vector3();
 let heartbeatTimer = 0;
 
 /** Picks the soundtrack for the moment, and the heartbeat when badly hurt. */
@@ -1473,6 +1638,7 @@ function updateSound(dt: number) {
   const fight = campaign.activeFight;
   if (endingShown) theme = 'victory';
   else if (phase === 'menu') theme = 'title';
+  else if (duel) theme = duelLive() && !duelOver ? 'battle' : 'explore';
   else if (!ctx.players.some((h) => h.alive)) theme = 'silence';
   else if (fight) {
     theme = 'boss';
@@ -1551,7 +1717,7 @@ function tick(realDt: number) {
     if (((!hud.inventoryOpen && !hud.shopOpen) || sideInventory) && !closedNow && (input.locked || padPlay || testMode) && !endingShown) {
       playTime += realDt;
       const chooserInput = browsing ? inputOf(browsing) : null;
-      if (inputs.some((i) => i !== chooserInput && i.mapPressed)) hud.showMap(!hud.mapOpen);
+      if (!duel && inputs.some((i) => i !== chooserInput && i.mapPressed)) hud.showMap(!hud.mapOpen);
       if (!hud.inventoryOpen && !hud.p2PickerOpen && !hud.shopOpen && !hud.pauseOpen) {
         if (input.inventoryPressed && player.alive) openInventory(player);
         else if (twoPlayer && input2.inventoryPressed && player2.alive) openInventory(player2);
@@ -1571,18 +1737,23 @@ function tick(realDt: number) {
       }
       player.update(dt, ctx, in1, camCtrl.yaw);
       if (twoPlayer) player2.update(dt, ctx, in2, camCtrl2.yaw);
-      updateRevives();
-      updateShopTriggers();
-      updateCommander();
+      if (duel) updateDuel();
+      else {
+        updateRevives();
+        updateShopTriggers();
+        updateCommander();
+      }
       for (const a of allies) a.update(dt, ctx);
-      updateEnemies(dt);
+      if (!duel) updateEnemies(dt);
       separateBodies();
-      campaign.update(dt, ctx);
+      if (!duel) campaign.update(dt, ctx);
       projectiles.update(dt, ctx);
-      const claimed = drops.update(dt, ctx.players.filter((h) => h.alive), particles, (h, w) => needsDrop(h, w.id));
-      if (claimed) claimWeapon(claimed.weapon, claimed.by);
-      const scooped = coinPiles.update(dt, activeHeroes().filter((h) => h.alive), particles, needsCoins);
-      if (scooped) collectCoins(scooped.id, scooped.by);
+      if (!duel) {
+        const claimed = drops.update(dt, ctx.players.filter((h) => h.alive), particles, (h, w) => needsDrop(h, w.id));
+        if (claimed) claimWeapon(claimed.weapon, claimed.by);
+        const scooped = coinPiles.update(dt, activeHeroes().filter((h) => h.alive), particles, needsCoins);
+        if (scooped) collectCoins(scooped.id, scooped.by);
+      }
       particles.update(dt);
       floaters.update(dt, camera);
       if (twoPlayer) floaters2.update(dt, camera2);
@@ -1595,7 +1766,7 @@ function tick(realDt: number) {
       camera2.updateMatrixWorld();
     }
 
-    if (ctx.players.every((h) => !h.alive && h.stateTime > 1.6) && !deathShown) {
+    if (!duel && ctx.players.every((h) => !h.alive && h.stateTime > 1.6) && !deathShown) {
       deathShown = true;
       hud.showMap(false);
       hud.showPause(false);
@@ -1606,17 +1777,25 @@ function tick(realDt: number) {
       hud.showDeath(true);
     }
 
-    const lead = ctx.leader;
-    const objective = weaponObjective() ?? missionObjective() ?? campaign.objective(lead.pos, player.level);
-    hud.setObjective(objective.text);
-    hud.views[0].setMarker(objective.at, camera, player.pos);
-    if (twoPlayer) hud.views[1].setMarker(objective.at, camera2, player2.pos);
-    const fight = campaign.activeFight;
-    if (fight) hud.setBossHealth(fight.leader.healthFraction);
-    if (hud.mapOpen) hud.drawMap(mapData(objective));
+    if (duel) {
+      hud.setObjective(duelLive() ? `Duel · ${duelScoreText()} · First to ${DUEL_TARGET}` : 'Waiting for Player 2 · press A on the second controller');
+      hud.views[0].setMarker(null, camera, player.pos);
+      hud.views[1].setMarker(null, camera2, player2.pos);
+    } else {
+      const lead = ctx.leader;
+      const objective = weaponObjective() ?? missionObjective() ?? campaign.objective(lead.pos, player.level);
+      hud.setObjective(objective.text);
+      hud.views[0].setMarker(objective.at, camera, player.pos);
+      if (twoPlayer) hud.views[1].setMarker(objective.at, camera2, player2.pos);
+      const fight = campaign.activeFight;
+      if (fight) hud.setBossHealth(fight.leader.healthFraction);
+      if (hud.mapOpen) hud.drawMap(mapData(objective));
+    }
   }
 
-  world.update(ctx.leader.pos, realDt, campaign.gloomAt(ctx.leader.pos));
+  // The sun's shadows cover the whole arena in a duel (centered between the heroes).
+  const focus = duel && twoPlayer ? duelFocus.copy(player.pos).add(player2.pos).multiplyScalar(0.5) : ctx.leader.pos;
+  world.update(focus, realDt, campaign.gloomAt(focus));
   // Nothing past the fog can be seen, so don't draw it.
   const far = (scene.fog as THREE.Fog).far + 15;
   for (const c of [camera, camera2]) {
@@ -1629,12 +1808,13 @@ function tick(realDt: number) {
   updateXboxTip(realDt);
   // A live controller readout on the pause screen, for tracking down stuck sticks or keys.
   if (hud.pauseOpen) hud.setPadDebug(input.debugText() + (twoPlayer ? ` · P2 ${input2.debugText()}` : ''));
-  hud.update(kills);
+  hud.update(duel ? (duelLive() ? duelScoreText() : 'The Arena') : `Enemies slain: ${kills}`);
   hud.setButtonHints(IS_XBOX || twoPlayer || input.mode === 'gamepad');
   const commander = isCommander();
   hud.views[0].update(player, revivingIn(player), commander);
   if (twoPlayer) hud.views[1].update(player2, revivingIn(player2), commander);
-  hud.setOrdersAvailable(commander && phase === 'playing');
+  // Anyone can order their army about in a duel.
+  hud.setOrdersAvailable((commander || duel) && phase === 'playing');
   for (const i of inputs) i.endFrame();
 }
 
@@ -1811,6 +1991,11 @@ Object.assign(window, {
     input2,
     joinPlayer2,
     leavePlayer2,
+    enterDuel,
+    ctx,
+    get duel() {
+      return { on: duel, live: duelLive(), over: duelOver, score: duelScore };
+    },
     get twoPlayer() {
       return twoPlayer;
     },

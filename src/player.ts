@@ -196,7 +196,11 @@ export class Player implements Target {
   private readonly target = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
 
+  /** Whose side the hero is on: 0 for Player 1, 1 for Player 2 (they're foes in a duel). */
+  readonly team: 0 | 1;
+
   constructor(scene: THREE.Scene, second = false) {
+    this.team = second ? 1 : 0;
     this.baseLook = second ? PLAYER2_LOOK : PLAYER_LOOK;
     this.h = createHumanoid(this.baseLook);
     scene.add(this.h.root);
@@ -641,7 +645,7 @@ export class Player implements Target {
   }
 
   private checkHits(sw: Swing, ctx: GameContext) {
-    for (const e of ctx.enemies) {
+    for (const e of ctx.foesOf(this.team)) {
       if (!e.alive || e.flying || this.swingHits.has(e)) continue;
       const dx = e.pos.x - this.pos.x;
       const dz = e.pos.z - this.pos.z;
@@ -699,7 +703,7 @@ export class Player implements Target {
       const at = new THREE.Vector3(this.pos.x + fx * 1.4, this.pos.y, this.pos.z + fz * 1.4);
       const { radius, share } = special.slam;
       const damage = Math.round(sw.damage * this.damageMultiplier * share);
-      for (const e of ctx.enemies) {
+      for (const e of ctx.foesOf(this.team)) {
         if (!e.alive || e.flying || this.swingHits.has(e)) continue;
         const dx = e.pos.x - at.x;
         const dz = e.pos.z - at.z;

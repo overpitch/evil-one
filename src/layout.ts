@@ -20,6 +20,30 @@ export interface Spot {
 export const HUMAN_CAMP = { x: 0, z: 0 };
 export const CAMP_BANNER = { id: 'camp', name: 'Human Camp', x: 3, z: -9 };
 
+/**
+ * The duel arena: a walled ring far outside the map (past the fog, so the
+ * world can't be seen from it). Red (Player 1) starts at the south end,
+ * blue (Player 2) at the north end. Everything within `zone` of it is flat.
+ */
+export const DUEL_ARENA = {
+  x: 0,
+  z: 600,
+  r: 30,
+  zone: 140,
+  /** Four stone pillars to fight around. */
+  pillars: [
+    [-9, -7],
+    [9, -7],
+    [-9, 7],
+    [9, 7],
+  ] as [number, number][],
+  /** Where each side's hero starts and comes back, and the way they face. */
+  spawns: [
+    { x: 0, z: 600 - 22, yaw: 0 },
+    { x: 0, z: 600 + 22, yaw: Math.PI },
+  ],
+};
+
 /** A Fort Victory shop, Commander Hale's missions (after the war), or a commander's army orders. */
 export type ShopKind = 'potions' | 'armory' | 'weapons' | 'barracks' | 'missions' | 'orders';
 

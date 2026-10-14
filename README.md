@@ -109,6 +109,10 @@ Every enemy you beat gives gold (leaders give a lot); in two-player each hero ha
 
 After naming a new hero you dress them: shirt, long shirt or chainmail; pants, shorts, or shorts with fishnet stockings (pink, or black for Player 2); and colors. Change it any time with **Pause → Outfit**.
 
+## Duel
+
+**Duel** on the title screen takes your saved hero (with their level, weapons and armor) and army into an arena far from the war, with no monsters. Player 2 presses A on a second controller and picks one of their saved heroes. Each hero leads their own army (red against blue), and the first to knock out the other hero 5 times wins. A knocked-out hero comes back at their end of the arena after 4 seconds, along with any soldiers they lost. Anyone can give their army orders from the pause menu. A duel never changes your saved heroes. Potions drunk in a duel come back afterward.
+
 ## Saving
 
 Touching a standing red banner makes it your checkpoint: it saves the game, restores your health and replaces fallen soldiers. Capturing an outpost raises a new banner there. If you die, you return to your last checkpoint and lose any XP earned since.

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, mulberry32, smoothing } from './util';
-import { FORT, HUMAN_CAMP, TERRITORIES, VAMPIRE_LAND, VILLAGE_RUINS, type OutpostDef, type ShopKind, type TerritoryDef, type TerritoryId } from './layout';
+import { DUEL_ARENA, FORT, HUMAN_CAMP, TERRITORIES, VAMPIRE_LAND, VILLAGE_RUINS, type OutpostDef, type ShopKind, type TerritoryDef, type TerritoryId } from './layout';
 import { createHumanoid, type HumanoidLook } from './character';
 
 export const WORLD_HALF = 150;
@@ -120,6 +120,18 @@ function castleHeight(x: number, z: number): number | null {
 /** Keeps a camera inside the goo castle's walls while its hero is inside (the goo ring is narrow). */
 export function keepCameraInCastle(cam: THREE.Vector3, hero: THREE.Vector3) {
   keepCameraInMansion(cam, hero);
+  if (inDuelZone(hero.x, hero.z)) {
+    // Inside the duel arena's wall too.
+    const limit = DUEL_ARENA.r - 0.4;
+    const dx = cam.x - DUEL_ARENA.x;
+    const dz = cam.z - DUEL_ARENA.z;
+    const d = Math.hypot(dx, dz);
+    if (d > limit) {
+      cam.x = DUEL_ARENA.x + (dx / d) * limit;
+      cam.z = DUEL_ARENA.z + (dz / d) * limit;
+    }
+    return;
+  }
   const onBridge = castleCoords(hero.x, hero.z);
   if (onBridge.across <= BRIDGE_HALF && onBridge.along > CASTLE_PLATFORM_R) return;
   const limit = CASTLE.r - 0.9;
@@ -165,7 +177,13 @@ export function blockGooClimb(fromX: number, fromZ: number, pos: THREE.Vector3) 
 
 /** Height everything walks on: the terrain, or the goo castle's platform, bridge and stairs. */
 export function heightAt(x: number, z: number): number {
+  if (inDuelZone(x, z)) return 0;
   return castleHeight(x, z) ?? terrainHeight(x, z);
+}
+
+/** Around the duel arena (far outside the map), where the ground is flat. */
+export function inDuelZone(x: number, z: number) {
+  return Math.abs(x - DUEL_ARENA.x) < DUEL_ARENA.zone && Math.abs(z - DUEL_ARENA.z) < DUEL_ARENA.zone;
 }
 
 /** Terrain height: rolling hills, flattened around camps and arenas. */
@@ -262,6 +280,18 @@ export function resolveColliders(pos: THREE.Vector3, radius: number, colliders: 
       if (ox < oz) pos.x += Math.sign(pos.x - b.x || 1) * ox;
       else pos.z += Math.sign(pos.z - b.z || 1) * oz;
     }
+  }
+  // In the duel arena: inside its round wall.
+  if (inDuelZone(pos.x, pos.z)) {
+    const dx = pos.x - DUEL_ARENA.x;
+    const dz = pos.z - DUEL_ARENA.z;
+    const d = Math.hypot(dx, dz);
+    const max = DUEL_ARENA.r - 0.6 - radius;
+    if (d > max) {
+      pos.x = DUEL_ARENA.x + (dx / d) * max;
+      pos.z = DUEL_ARENA.z + (dz / d) * max;
+    }
+    return;
   }
   const edge = WORLD_HALF - 3;
   pos.x = clamp(pos.x, -edge, edge);
@@ -390,6 +420,7 @@ export function createWorld(scene: THREE.Scene) {
   // The castle's stonework and goo don't move (only its bubbles do).
   for (const o of scene.children.slice(beforeCastle)) if (o instanceof THREE.Mesh && !o.userData.bubble) o.userData.mergeable = true;
   addDreadManor(scene, colliders, TERRITORIES.find((t) => t.requires)!);
+  animated.push(addDuelArena(scene, colliders));
   mergeStaticScenery(scene);
   const seal = addSeal(scene, TERRITORIES.find((t) => t.requires)!);
 
@@ -1706,6 +1737,107 @@ function addSeal(scene: THREE.Scene, t: TerritoryDef) {
 }
 
 /** Where the hero stands after respawning at a banner: just beside it. */
+// ---------- The duel arena ----------
+
+/**
+ * A sandy ring with a stone wall, tiered stands full of cheering crowds,
+ * red banners on Player 1's side and blue on Player 2's, torches, and four
+ * pillars to fight around. Returns the flicker of the torches.
+ */
+function addDuelArena(scene: THREE.Scene, colliders: Colliders): (time: number) => void {
+  const { x: cx, z: cz, r } = DUEL_ARENA;
+  const at = (angle: number, dist: number) => [cx + Math.sin(angle) * dist, cz + Math.cos(angle) * dist] as const;
+
+  // Grassy fields all around, and the sand of the ring.
+  const field = new THREE.Mesh(new THREE.CircleGeometry(DUEL_ARENA.zone, 48).rotateX(-Math.PI / 2), lambert(0x4f7a3a));
+  field.position.set(cx, -0.02, cz);
+  field.receiveShadow = true;
+  scene.add(field);
+  const sand = new THREE.Mesh(new THREE.CircleGeometry(r, 48).rotateX(-Math.PI / 2), lambert(0xc9ad7a));
+  sand.position.set(cx, 0.01, cz);
+  sand.receiveShadow = true;
+  scene.add(sand);
+  // A painted line across the middle, and a circle in the center.
+  const line = new THREE.Mesh(new THREE.PlaneGeometry(r * 2 - 2, 0.25).rotateX(-Math.PI / 2), lambert(0xe8dcc0));
+  line.position.set(cx, 0.03, cz);
+  scene.add(line);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(4, 4.3, 40).rotateX(-Math.PI / 2), lambert(0xe8dcc0));
+  ring.position.set(cx, 0.03, cz);
+  scene.add(ring);
+
+  // The wall: stone blocks all the way round, with a darker cap.
+  const stone = lambert(0x8b8478);
+  const cap = lambert(0x6a645a);
+  const SEGMENTS = 48;
+  const segLen = ((Math.PI * 2 * (r + 0.6)) / SEGMENTS) * 1.04;
+  for (let i = 0; i < SEGMENTS; i++) {
+    const a = (i / SEGMENTS) * Math.PI * 2;
+    const [x, z] = at(a, r + 0.6);
+    place(scene, new THREE.BoxGeometry(segLen, 2.4, 1.2), stone, x, z, 1.2, a);
+    place(scene, new THREE.BoxGeometry(segLen, 0.3, 1.5), cap, x, z, 2.55, a);
+  }
+
+  // Stands: three rising tiers of seats outside the wall, packed with spectators.
+  const seat = lambert(0x6d5a44);
+  const crowd = [0xb33a3a, 0x3a5ab3, 0xd9b24a, 0x4a8a4a, 0xe0b48a, 0x8d5a3b, 0xeeeeee, 0x5a3a7a].map((c) => lambert(c));
+  const rand = mulberry32(99);
+  for (let tier = 0; tier < 3; tier++) {
+    const dist = r + 2.4 + tier * 2;
+    const height = 1.4 + tier * 1.3;
+    const n = 56 + tier * 6;
+    const len = ((Math.PI * 2 * dist) / n) * 1.05;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const [x, z] = at(a, dist);
+      place(scene, new THREE.BoxGeometry(len, height, 2), seat, x, z, height / 2, a);
+      // Most seats are taken.
+      if (rand() < 0.75) {
+        const [px, pz] = at(a + (rand() - 0.5) * 0.03, dist - 0.3);
+        place(scene, new THREE.BoxGeometry(0.5, 0.7, 0.4), crowd[Math.floor(rand() * crowd.length)], px, pz, height + 0.35, a);
+        place(scene, new THREE.BoxGeometry(0.34, 0.34, 0.34), crowd[4 + Math.floor(rand() * 3)], px, pz, height + 0.88, a);
+      }
+    }
+  }
+
+  // Each side's banners: red behind Player 1's start, blue behind Player 2's.
+  const pole = lambert(0x4a3a2a);
+  for (const [side, color] of [[0, 0xb32a2a], [1, 0x2a4ab3]] as const) {
+    const cloth = lambert(color, { side: THREE.DoubleSide });
+    const base = side === 0 ? Math.PI : 0;
+    for (const off of [-0.5, -0.25, 0, 0.25, 0.5]) {
+      const a = base + off;
+      const [x, z] = at(a, r + 0.6);
+      place(scene, new THREE.CylinderGeometry(0.08, 0.08, 4.6, 6), pole, x, z, 2.3, a);
+      place(scene, new THREE.BoxGeometry(1.1, 1.6, 0.06), cloth, x, z, 3.6, a);
+    }
+  }
+
+  // Four pillars to fight around (solid).
+  const pillarStone = lambert(0x9a9286);
+  for (const [px, pz] of DUEL_ARENA.pillars) {
+    place(scene, new THREE.CylinderGeometry(0.9, 1.05, 4.2, 10), pillarStone, cx + px, cz + pz, 2.1);
+    place(scene, new THREE.BoxGeometry(2.3, 0.4, 2.3), cap, cx + px, cz + pz, 0.2);
+    place(scene, new THREE.BoxGeometry(2.1, 0.35, 2.1), cap, cx + px, cz + pz, 4.35);
+    colliders.circles.push({ x: cx + px, z: cz + pz, r: 1.05 });
+  }
+
+  // Torches on the wall, flickering.
+  const flames: THREE.Mesh[] = [];
+  const flameMat = new THREE.MeshBasicMaterial({ color: 0xffa23a });
+  for (let i = 0; i < 12; i++) {
+    const a = ((i + 0.5) / 12) * Math.PI * 2;
+    const [x, z] = at(a, r + 0.1);
+    place(scene, new THREE.CylinderGeometry(0.07, 0.1, 0.9, 6), pole, x, z, 2.9);
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), flameMat);
+    flame.position.set(x, 3.6, z);
+    scene.add(flame);
+    flames.push(flame);
+  }
+  return (time) => {
+    flames.forEach((f, i) => f.scale.set(1, 0.8 + 0.3 * Math.sin(time * 11 + i * 1.7), 1));
+  };
+}
+
 export function respawnPoint(banner: { x: number; z: number }) {
   return { x: banner.x - 1.5, z: banner.z - 2.5 };
 }

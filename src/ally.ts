@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { createHumanoid, HIPS_HEIGHT, resetPose, setFlash, type Humanoid } from './character';
-import type { Enemy } from './enemy';
-import type { GameContext, HitResult, Target } from './types';
+import type { Foe, GameContext, HitResult, Target } from './types';
 import type { Player } from './player';
 import { boxShape } from './shapes';
 import { heightAt, resolveColliders } from './world';
@@ -63,7 +62,7 @@ export class Ally implements Target {
   state: State = 'gone';
   stateTime = 0;
 
-  private target: Enemy | null = null;
+  private target: Foe | null = null;
   private retargetTimer = 0;
   private struck = false;
   private recoverTime = RECOVER;
@@ -125,9 +124,9 @@ export class Ally implements Target {
     this.h.root.visible = false;
   }
 
-  /** The hero to follow right now. */
+  /** The hero to follow right now (in a duel, never the other side's). */
   private leaderOf(ctx: GameContext) {
-    return this.hero?.alive ? this.hero : ctx.leader;
+    return this.hero?.alive || (ctx.duel && this.hero) ? this.hero : ctx.leader;
   }
 
   /** Patches a living soldier back up to full health. */
@@ -293,13 +292,13 @@ export class Ally implements Target {
     return 'hit';
   }
 
-  private findTarget(ctx: GameContext): Enemy | null {
+  private findTarget(ctx: GameContext): Foe | null {
     if (ctx.peaceful) return null;
-    let best: Enemy | null = null;
+    let best: Foe | null = null;
     const range = ORDER_RANGES[this.order];
     let bestDist = range.engage;
     const anchor = this.order === 'hold' ? this.holdAt : this.leaderOf(ctx).pos;
-    for (const z of ctx.enemies) {
+    for (const z of ctx.foesOf(this.army)) {
       if (!z.alive || z.state === 'rising' || z.flying || !z.fightActive) continue;
       if (Math.hypot(z.pos.x - anchor.x, z.pos.z - anchor.z) > range.leash) continue;
       const d = z.pos.distanceTo(this.pos);

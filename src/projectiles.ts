@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import type { GameContext, Target } from './types';
-import type { Enemy } from './enemy';
+import type { Foe, GameContext, Target } from './types';
 import type { Player } from './player';
 import { heightAt } from './world';
 import { sfx, volumeAt } from './audio';
@@ -201,9 +200,9 @@ export class Projectiles {
     for (const p of this.items) if (p.active) this.kill(p);
   }
 
-  private enemyAt(p: Projectile, ctx: GameContext): Enemy | null {
+  private enemyAt(p: Projectile, ctx: GameContext): Foe | null {
     const r = SPECS[p.kind].radius;
-    for (const e of ctx.enemies) {
+    for (const e of ctx.foesOf(p.owner!.team)) {
       if (!e.alive || e.flying || !e.fightActive) continue;
       const dx = p.pos.x - e.pos.x;
       const dz = p.pos.z - e.pos.z;

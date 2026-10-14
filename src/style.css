@@ -466,6 +466,12 @@ h1.victory {
   margin-bottom: 24px;
 }
 
+/* The duel's winner (names can be long). */
+#duel-winner {
+  font-size: clamp(32px, 5vw, 56px);
+  margin-bottom: 12px;
+}
+
 .ending-stats,
 .ending-buttons {
   opacity: 0;

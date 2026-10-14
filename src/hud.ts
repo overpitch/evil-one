@@ -68,7 +68,7 @@ const DEATH_TIPS = [
 /** One line in a shop: a heading, or something to buy, sell or trade. */
 export type ShopEntry = { heading: string } | { label: string; sub: string; disabled?: boolean; onClick: () => void };
 
-type Screen = 'title' | 'name' | 'outfit' | 'intro' | 'options' | 'ending' | 'none';
+type Screen = 'title' | 'name' | 'outfit' | 'intro' | 'options' | 'ending' | 'duel' | 'none';
 
 /** "the Zombie King", for "Defeat the Zombie King". */
 function leaderTitle(id: string) {
@@ -212,6 +212,10 @@ export class Hud {
   onSettings?: (settings: Settings) => void;
   onKeepExploring?: () => void;
   onQuitToTitle?: () => void;
+  /** Title: start a duel. Duel over: play again, or leave. */
+  onDuel?: () => void;
+  onRematch?: () => void;
+  onLeaveDuel?: () => void;
   onEndingTitle?: () => void;
   onInventory?: () => void;
   onInventoryClose?: () => void;
@@ -250,6 +254,7 @@ export class Hud {
     options: $('options-screen'),
     ending: $('ending-screen'),
     outfit: $('outfit-screen'),
+    duel: $('duel-screen'),
   };
   private readonly pause = $('pause-screen');
   private readonly death = $('death-screen');
@@ -325,6 +330,9 @@ export class Hud {
     $('begin-btn').addEventListener('click', () => this.onBegin?.());
     $('keep-exploring-btn').addEventListener('click', () => this.onKeepExploring?.());
     $('quit-btn').addEventListener('click', () => this.onQuitToTitle?.());
+    $('duel-btn').addEventListener('click', () => this.onDuel?.());
+    $('rematch-btn').addEventListener('click', () => this.onRematch?.());
+    $('leave-duel-btn').addEventListener('click', () => this.onLeaveDuel?.());
     // The controller test page (same site, so no address to type on a console).
     $('controller-test-btn').addEventListener('click', () => location.assign('./?padtest'));
     // Every menu button clicks.
@@ -709,6 +717,19 @@ export class Hud {
     $('pause-back-btn').classList.toggle('hidden', !available);
   }
 
+  /** In a duel, the pause menu has no fort, outfit or Player 2 buttons, and Quit leaves the arena. */
+  setDuelMode(on: boolean) {
+    for (const id of ['pause-p2-btn', 'pause-fort-btn', 'pause-outfit-btn']) $(id).classList.toggle('hidden', on);
+    $('quit-btn').textContent = on ? 'Leave the arena' : 'Quit to title';
+  }
+
+  /** A duel is won: the winner, the final score, and Rematch or Leave. */
+  showDuelOver(winner: string, score: string) {
+    $('duel-winner').textContent = `${winner} wins!`;
+    $('duel-score').textContent = score;
+    this.showScreen('duel');
+  }
+
   /** Commanders get an Army orders button on the pause menu. */
   setOrdersAvailable(available: boolean) {
     $('pause-orders-btn').classList.toggle('hidden', !available);
@@ -852,6 +873,16 @@ export class Hud {
     if (!this.announcing) this.nextAnnouncement();
   }
 
+  /** Shows this message right away, dropping any still waiting (a duel's knockouts). */
+  announceNow(title: string, detail: string, gold = false) {
+    this.announceQueue.length = 0;
+    clearTimeout(this.announceTimer);
+    this.announceQueue.push({ title, detail, gold });
+    this.nextAnnouncement();
+  }
+
+  private announceTimer = 0;
+
   private nextAnnouncement() {
     const next = this.announceQueue.shift();
     if (!next) {
@@ -865,7 +896,7 @@ export class Hud {
     this.announceEl.classList.remove('show');
     void this.announceEl.offsetWidth; // restart the animation
     this.announceEl.classList.add('show');
-    setTimeout(() => this.nextAnnouncement(), ANNOUNCE_TIME);
+    this.announceTimer = window.setTimeout(() => this.nextAnnouncement(), ANNOUNCE_TIME);
   }
 
   showLevelUp(level: number, heroName?: string) {
@@ -917,7 +948,8 @@ export class Hud {
 
   // ---------- Status ----------
 
-  update(kills: number) {
-    this.kills.textContent = `Enemies slain: ${kills}`;
+  /** The top-right tally: enemies slain, or a duel's score. */
+  update(tally: string) {
+    if (this.kills.textContent !== tally) this.kills.textContent = tally;
   }
 }

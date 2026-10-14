@@ -19,6 +19,25 @@ export interface Target {
   takeDamage(amount: number, from: THREE.Vector3, ctx: GameContext, unblockable?: boolean): HitResult;
 }
 
+/**
+ * Anything a hero's or soldier's sword can hit: an enemy, or (in a duel)
+ * the other side's hero and soldiers.
+ */
+export interface Foe {
+  readonly pos: THREE.Vector3;
+  readonly radius: number;
+  readonly alive: boolean;
+  /** Too high for a sword to reach. */
+  readonly flying: boolean;
+  /** Fighting (not hanging back until its fight begins). */
+  readonly fightActive: boolean;
+  readonly state: string;
+  /** Height above the ground, and the body (for how tall it is). */
+  readonly airY: number;
+  readonly h: { readonly root: THREE.Object3D };
+  takeHit(damage: number, dir: THREE.Vector3, knockback: number, heavy: boolean, ctx: GameContext, attacker: Target): 'hit' | 'parried' | 'blocked' | 'ignored';
+}
+
 /** Shared game state handed to every entity's update. */
 export interface GameContext {
   scene: THREE.Scene;
@@ -31,6 +50,10 @@ export interface GameContext {
   leader: Player;
   allies: Ally[];
   enemies: Enemy[];
+  /** Who side `team` (0: Player 1's, 1: Player 2's) can hit: every enemy, or in a duel the other side. */
+  foesOf(team: 0 | 1): readonly Foe[];
+  /** A duel: the two heroes and their armies fight each other (soldiers never follow the other hero). */
+  duel: boolean;
   particles: Particles;
   projectiles: Projectiles;
   /** Current difficulty (from Options); can change mid-game. */

@@ -64,6 +64,7 @@
         <div class="menu" id="title-menu">
           <button id="continue-btn" class="hidden">Continue<span class="button-sub" id="continue-sub"></span></button>
           <button id="new-game-btn">New Game</button>
+          <button id="duel-btn" class="secondary">Duel<span class="button-sub">Two players, two armies</span></button>
           <button id="title-options-btn" class="secondary">Options</button>
         </div>
         <p class="xbox-tip hidden" id="xbox-tip">
@@ -255,6 +256,18 @@
         <div class="menu row ending-buttons">
           <button id="keep-exploring-btn">Keep exploring</button>
           <button id="ending-title-btn" class="secondary">Title screen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- A duel is won -->
+    <div id="duel-screen" class="overlay screen hidden">
+      <div class="panel">
+        <h1 class="victory" id="duel-winner"></h1>
+        <p class="subtitle" id="duel-score"></p>
+        <div class="menu row">
+          <button id="rematch-btn">Rematch</button>
+          <button id="leave-duel-btn" class="secondary">Leave the arena</button>
         </div>
       </div>
     </div>
